@@ -4,7 +4,9 @@
 
 市面客户端的内核大多是 mihomo，而 mihomo 正式版只支持 Snell v1–v5（v6 还在 alpha）。SakuNet 选用 **sing-box ≥ 1.14** 作内核：它原生覆盖 Snell 4/6（含 v6 的 `default / unshaped / unsafe-raw` 流量整形模式），同时吃下 AnyTLS、Hysteria2、Naive、TUIC、VLESS、VMess、Trojan、Shadowsocks，一套内核全协议。
 
-界面不发明新交互：**以 Quantumult X 的设计语言为第一参照**（节点行国旗＋彩色延迟胶囊、底部三标签栏、卡片式策略组），操作骨架是 Surge / Shadowrocket 的范式（大开关＋「规则 / 全局代理 / 全局直连」三段模式＋策略组点选），换平台零学习成本。
+界面不发明新交互：**以 Quantumult X 的设计语言为第一参照**（节点行国旗＋彩色延迟胶囊、底部三标签栏、卡片式策略组），操作骨架是 Surge / Shadowrocket 的范式（大开关＋「规则分流 / 全部代理 / 全部直连」三段模式＋策略组点选），换平台零学习成本。
+
+v0.2 做了「QX × Surge 取长补短」校准（依据为对 QX 1.8.1 / Surge 5.102.0 已解密 IPA 的资源层实测提取）：延迟胶囊保留 Surge 式具体毫秒数字、配色换 QX 的系统色纪律（#34C759 / #FF9500 / #FF3B30）；策略组图标位对齐 QX policy-image 的 36px；选中态在对勾之外吸收 QX 标志性的 4×16 竖条标记；三段文案改 QX 官方口径。底色 #F2F2F7 与连接绿 #34C759 经实测与现值一致，未动。
 
 ## 协议矩阵
 
@@ -75,8 +77,9 @@ go test ./...                    # 配置生成单测（模式/Snell 映射）
 
 ## 路线图
 
-- v0.2：系统托盘、TUN 开关打磨、订阅 URL 导入（snell:// / anytls:// 等链接解析）
-- v0.3：直接导入 slynnnn/surge-config 私有仓的 Surge 配置（节点与分流口径自动迁移）
+- v0.2（已发布）：QX × Surge 校准——延迟胶囊系统色、组图标 36px、选中竖条＋对勾、三段文案改 QX 口径（规则分流 / 全部代理 / 全部直连）、次级文字 #3C3C43 α60% 一档、按钮高度归一 30px 档
+- v0.3：系统托盘、TUN 开关打磨、订阅 URL 导入（snell:// / anytls:// 等链接解析）
+- v0.4：直接导入 slynnnn/surge-config 私有仓的 Surge 配置（节点与分流口径自动迁移）
 
 ## 许可
 
