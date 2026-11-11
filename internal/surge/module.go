@@ -8,11 +8,12 @@ import (
 
 // .sgmodule support. A Surge module can carry many section kinds;
 // SakuNet merges what its engines execute — [MITM] hostnames and
-// [URL Rewrite] rules into the MITM/rewrite engine, and [Script]
+// [URL Rewrite] rules into the MITM/rewrite engine, [Script]
 // definitions into the JS engine (since v1.1: http-request /
-// http-response scripts run; other types are preserved and
-// reported as unsupported). [Rule] / [Proxy] sections of a module
-// are reported as not merged.
+// http-response run on MITM traffic; since v1.2: cron scripts are
+// scheduled and Panel-referenced scripts render panels), and
+// [Panel] definitions into the panel list. [Rule] / [Proxy]
+// sections of a module are reported as not merged.
 
 type ModuleRecord struct {
 	Name      string    `json:"name"`
@@ -20,6 +21,7 @@ type ModuleRecord struct {
 	Hostnames int       `json:"hostnames"`
 	Rewrites  int       `json:"rewrites"`
 	Scripts   int       `json:"scripts"`
+	Panels    int       `json:"panels,omitempty"`
 }
 
 // ModuleResult is the outcome of parsing one .sgmodule file.
@@ -29,6 +31,7 @@ type ModuleResult struct {
 	Rewrites     []RewriteRule
 	ScriptNames  []string
 	Scripts      []ScriptDef
+	Panels       []PanelDef
 	OtherSection map[string]int // sections present but not merged
 	Notes        []string
 }
@@ -89,6 +92,20 @@ func ParseModule(name string, data []byte) *ModuleResult {
 				mr.ScriptNames = append(mr.ScriptNames, name)
 				_, kv := params(splitFields(rest))
 				mr.Scripts = append(mr.Scripts, ScriptDef{Name: name, Params: kv})
+			}
+		case "Panel":
+			n, rest, ok := strings.Cut(line, "=")
+			if ok {
+				_, kv := params(splitFields(rest))
+				pd := PanelDef{
+					Name:       strings.TrimSpace(n),
+					ScriptName: kv["script-name"],
+					Title:      kv["title"],
+				}
+				if v := kv["update-interval"]; v != "" {
+					pd.UpdateInterval = atoi(v, 0)
+				}
+				mr.Panels = append(mr.Panels, pd)
 			}
 		default:
 			if section != "" {
@@ -153,13 +170,26 @@ func (imp *Imported) MergeModule(mr *ModuleResult) ModuleRecord {
 		imp.Engine.Scripts = append(imp.Engine.Scripts, sd)
 		addedS++
 	}
+	haveP := map[string]bool{}
+	for _, p := range imp.Engine.Panels {
+		haveP[p.Name] = true
+	}
+	addedP := 0
+	for _, pd := range mr.Panels {
+		if haveP[pd.Name] {
+			continue
+		}
+		haveP[pd.Name] = true
+		imp.Engine.Panels = append(imp.Engine.Panels, pd)
+		addedP++
+	}
 	rec := ModuleRecord{
 		Name: mr.Name, At: time.Now(),
-		Hostnames: addedH, Rewrites: addedR, Scripts: len(mr.ScriptNames),
+		Hostnames: addedH, Rewrites: addedR, Scripts: len(mr.ScriptNames), Panels: addedP,
 	}
 	imp.Modules = append(imp.Modules, rec)
 	imp.Report.Notes = append(imp.Report.Notes,
-		fmt.Sprintf("模块「%s」已并入：MITM 主机名 +%d、重写规则 +%d、脚本定义 +%d（已生效）", mr.Name, addedH, addedR, addedS))
+		fmt.Sprintf("模块「%s」已并入：MITM 主机名 +%d、重写规则 +%d、脚本定义 +%d、面板 +%d（已生效）", mr.Name, addedH, addedR, addedS, addedP))
 	imp.Report.Notes = append(imp.Report.Notes, mr.Notes...)
 	return rec
 }

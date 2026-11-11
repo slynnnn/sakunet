@@ -75,7 +75,28 @@ func convertEngineSections(rc *rawConfig, imp *Imported) {
 		rep.EnginePending = append(rep.EnginePending, PendingSection{
 			Section: "Script",
 			Count:   len(imp.Engine.Scripts),
-			Summary: fmt.Sprintf("%d 个脚本已导入（http-request/http-response 由 JS 脚本引擎执行，其余类型暂不支持）", len(imp.Engine.Scripts)),
+			Summary: fmt.Sprintf("%d 个脚本已导入（http-request/http-response/cron 由 JS 脚本引擎执行）", len(imp.Engine.Scripts)),
+		})
+	}
+
+	// [Panel]: name = script-name=..., title=..., update-interval=...
+	for _, pl := range rc.panels {
+		_, kv := params(pl.fields)
+		pd := PanelDef{
+			Name:       pl.name,
+			ScriptName: kv["script-name"],
+			Title:      kv["title"],
+		}
+		if v := kv["update-interval"]; v != "" {
+			pd.UpdateInterval = atoi(v, 0)
+		}
+		imp.Engine.Panels = append(imp.Engine.Panels, pd)
+	}
+	if len(imp.Engine.Panels) > 0 {
+		rep.EnginePending = append(rep.EnginePending, PendingSection{
+			Section: "Panel",
+			Count:   len(imp.Engine.Panels),
+			Summary: fmt.Sprintf("%d 个面板已导入（由面板脚本渲染到主页）", len(imp.Engine.Panels)),
 		})
 	}
 }

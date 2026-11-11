@@ -43,6 +43,11 @@ type runResult struct {
 	bodySet bool
 	status  int
 	respond *Response
+	// doneRaw is the raw $done({...}) argument object, kept for
+	// standalone runs (panel rendering reads title/content/icon
+	// from it). Nil when the script called $done() bare or the
+	// argument was not an object.
+	doneRaw map[string]any
 }
 
 func (d *Def) program() (*goja.Program, string) {
@@ -166,6 +171,7 @@ func (r *Runner) runOne(d *Def, req *Request, reqBody []byte, resp *Response) *r
 	if doneVal != nil && !goja.IsUndefined(doneVal) && !goja.IsNull(doneVal) {
 		obj, ok := doneVal.Export().(map[string]any)
 		if ok {
+			res.doneRaw = obj
 			applyDoneObject(res, obj, resp != nil)
 		}
 	}

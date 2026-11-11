@@ -25,6 +25,7 @@ type MITMInfo struct {
 	RulesOK       int                     `json:"rules_ok"`
 	Unsupported   []surge.UnsupportedRule `json:"unsupported,omitempty"`
 	Scripts       []script.Info           `json:"scripts,omitempty"`
+	Panels        []script.PanelView      `json:"panels,omitempty"`
 	CASubject     string                  `json:"ca_subject,omitempty"`
 	CAExpiry      string                  `json:"ca_expiry,omitempty"`
 	CAFingerprint string                  `json:"ca_fingerprint,omitempty"` // SHA-256, hex with colons
@@ -139,6 +140,10 @@ func (m *Manager) startEngineLocked() {
 		StorePath: filepath.Join(m.appDir, "script-store.json"),
 		Log:       log.New(os.Stderr, "", log.LstdFlags),
 	})
+	// Panels + cron scheduling (v1.2): panels render on the home
+	// page; cron scripts fire while the engine is up.
+	runner.SetPanels(imp.Engine.Panels)
+	runner.StartScheduler()
 	m.scriptRunner = runner
 	m.mitmInfo.Scripts = runner.Infos()
 	hasScripts := false
@@ -191,6 +196,9 @@ func (m *Manager) stopEngineLocked() {
 	if m.mitmSrv != nil {
 		m.mitmSrv.Close()
 		m.mitmSrv = nil
+	}
+	if m.scriptRunner != nil {
+		m.scriptRunner.StopScheduler()
 	}
 	m.scriptRunner = nil
 	if m.mitmInfo != nil {

@@ -7,6 +7,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"sakunet/internal/surge"
 )
 
 // Options configure a Runner.
@@ -54,6 +56,13 @@ type Runner struct {
 	notes    []Notification
 	stats    map[string]*runStat
 	logw     *log.Logger
+
+	// cron + panel machinery (v1.2, cronpanel.go)
+	panels     []surge.PanelDef
+	panelCache map[string]*panelState
+	lastFire   map[string]time.Time
+	schedStop  chan struct{}
+	tickDur    time.Duration
 }
 
 const maxLogEntries = 300
@@ -61,11 +70,14 @@ const maxLogEntries = 300
 // NewRunner builds a Runner from definitions (see FromEngine).
 func NewRunner(defs []*Def, opts Options) *Runner {
 	r := &Runner{
-		defs:     defs,
-		store:    map[string]string{},
-		storePth: opts.StorePath,
-		stats:    map[string]*runStat{},
-		logw:     opts.Log,
+		defs:       defs,
+		store:      map[string]string{},
+		storePth:   opts.StorePath,
+		stats:      map[string]*runStat{},
+		logw:       opts.Log,
+		panelCache: map[string]*panelState{},
+		lastFire:   map[string]time.Time{},
+		tickDur:    30 * time.Second,
 	}
 	if opts.StorePath != "" {
 		if raw, err := os.ReadFile(opts.StorePath); err == nil {
@@ -112,7 +124,9 @@ func (r *Runner) Infos() []Info {
 	for _, d := range r.defs {
 		in := Info{
 			Name: d.Name, Type: d.Type, Source: d.Source,
-			Enabled: d.Enabled, Supported: d.Supported, LoadErr: d.LoadErr,
+			Enabled: d.Enabled, LoadErr: d.LoadErr,
+			Supported: d.Supported || d.IsCron() || d.PanelRef,
+			Cron:      d.CronExpr, Panel: d.PanelRef,
 		}
 		if st, ok := r.stats[d.Name]; ok {
 			in.LastRun = st.at.Format(time.RFC3339)

@@ -378,6 +378,7 @@ func main() {
 			"hostnames": len(mr.Hostnames),
 			"rewrites":  len(mr.Rewrites),
 			"scripts":   len(mr.ScriptNames),
+			"panels":    len(mr.Panels),
 			"notes":     mr.Notes,
 		})
 	})
@@ -503,6 +504,9 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]string{"ok": "1"})
+	})
+	mux.HandleFunc("/api/panels", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, mgr.Panels())
 	})
 	mux.HandleFunc("/api/automation", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, mgr.Automation())

@@ -39,7 +39,9 @@
 | URL Rewrite 引擎 | ✅ 已实现 | 302/307 重定向、reject 类（reject/reject-200/-img/-dict/-array）、header 类（请求头/响应头的 set/add/del，语法见引擎说明）；其余类型逐条标「不支持」并在设置页列出 |
 | 正文重写（QX 式） | ✅ 已实现（v1.2） | `pattern request-body 搜索正则 替换` / `response-body` 同理，原生正则替换（$1 引用、替换可为空即删除）；与脚本引擎分工：简单替换走重写、复杂逻辑走脚本。边界：正文上限 4MiB（超出透传）、非 identity 编码（如 gzip）的正文不走原生重写（脚本引擎会解码处理） |
 | 模块 .sgmodule | ✅ 已实现（部分） | 内嵌 MITM hostname、重写规则与脚本定义并入引擎生效（脚本见下行）；[Rule]/[Proxy] 段不并入，逐项标注 |
-| Surge/QX 的 JS 脚本引擎 | ✅ 已实现（子集） | goja 运行时；`http-request` / `http-response` 脚本在 MITM 解密流量上执行（去广告主力场景）；API 子集见下文「脚本引擎子集边界」；cron/event 等其他类型保留并标注「暂不支持」 |
+| Surge/QX 的 JS 脚本引擎 | ✅ 已实现（子集） | goja 运行时；`http-request` / `http-response` 脚本在 MITM 解密流量上执行（去广告主力场景）；API 子集见下文「脚本引擎子集边界」；event 等其他类型保留并标注「暂不支持」 |
+| cron 脚本 | ✅ 已实现（v1.2） | `type=cron`＋`cronexpr`（5 段＋@daily/@hourly 等描述符），引擎运行时按计划独立执行（$persistentStore/$notification/$httpClient 均可用）；错过多个时段合并为一次（休眠唤醒不连环补跑） |
+| Surge Panel 面板 | ✅ 已实现（v1.2） | `[Panel]`（配置与模块均可）渲染到主页「面板」区：脚本 `$done({title, content, icon, icon-color})` 契约、按 update-interval 缓存、后台刷新不阻塞页面；流媒体解锁检测等面板内容**不内置**——脚本属用户自备（配置 [Script] 或模块导入） |
 | 分享链接导入 | ✅ 已实现 | snell://、anytls://、hysteria2://（hy2://）、ss://（含 SIP002/老式）、trojan://、vmess://、vless:// 单链接与订阅 URL（整包 base64 自动识别） |
 | TUN 模式 | ✅ 已实现 | 设置页开关；Windows 需管理员（未提权时开关直接拒绝并提示，不保存坏偏好），设置页有一键 UAC 提权重启；切换后重启失败自动回滚原设置并恢复内核运行（单测覆盖）。**验证边界**：配置生成经 sing-box check＋单测；本开发 VM 无建 TUN 接口权限（TUNSETIFF 被沙箱拒），未做接口级实测；Windows 全路由（auto_route）实测与 CI 内的 TUN 有限实测**均未做**，不宣称已验 |
 | 系统托盘 | ✅ 已实现（Windows） | 开关内核、模式三段、打开面板、退出 |
@@ -62,7 +64,7 @@
 - **支持的 API**：`$request`、`$response`、`$done`（无参＝放行，含对 `$request`/`$response` 的原地修改；对象参数按字段改写 url/headers/body/status；请求脚本可用 `$done({response:{status,headers,body}})` 直接应答＝拒绝/模拟）、`$persistentStore`（落本机 `script-store.json`，0600）、`$notification.post`（转面板通知与引擎日志）、`console.log`（进引擎日志）、`$httpClient.get/post`（回调式，同步执行、只许 http/https、超时受脚本预算约束）。
 - **QX 薄映射**：`$task.fetch`（Promise 式，映射到同一传输层）、`$prefs.valueForKey/setValueForKey/removeValueForKey`（映射到同一存储）、`$notify`（映射到通知）。
 - **硬超时**：每脚本单次执行有硬超时（定义里的 `timeout` 秒数，无则默认 10 秒），到时强制中断（goja Interrupt），死循环脚本不会拖住代理；脚本报错/超时一律放行原文并记入引擎日志（设置页可查最近执行结果与日志）。
-- **不支持**：`cron` / `event` / `generic` 等非 http 类型脚本（保留、标注、不执行）；`$httpAPI`（调用即抛可读错误并记日志）；`setTimeout` 等异步定时器与依赖事件循环的写法；脚本正文超过 4 MiB 的响应不进脚本（原样透传）。
+- **不支持**：`event` 等其余非 http 类型脚本（保留、标注、不执行；`generic` 仅在被 [Panel] 引用时为渲染而执行）；`$httpAPI`（调用即抛可读错误并记日志）；`setTimeout` 等异步定时器与依赖事件循环的写法；脚本正文超过 4 MiB 的响应不进脚本（原样透传）。v1.2 起 `cron` 已支持（见能力矩阵）。
 
 ## 配置来源
 

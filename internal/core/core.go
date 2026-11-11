@@ -338,6 +338,18 @@ func (m *Manager) Restart() error {
 	return m.Start()
 }
 
+// Panels returns the rendered Surge panels for the home page.
+// Empty when the engine is not up or no panels are defined.
+func (m *Manager) Panels() []script.PanelView {
+	m.mu.Lock()
+	r := m.scriptRunner
+	m.mu.Unlock()
+	if r == nil {
+		return []script.PanelView{}
+	}
+	return r.Panels()
+}
+
 // ScriptLogs returns the JS engine's recent log entries and
 // notifications for the settings page. Empty when no runner is up.
 func (m *Manager) ScriptLogs() (logs []script.LogEntry, notes []script.Notification) {
@@ -356,6 +368,7 @@ func (m *Manager) Status() Status {
 	defer m.mu.Unlock()
 	if m.scriptRunner != nil && m.mitmInfo != nil {
 		m.mitmInfo.Scripts = m.scriptRunner.Infos()
+		m.mitmInfo.Panels = m.scriptRunner.Panels()
 	}
 	st := Status{Mode: m.mode, Binary: m.binary, NodesFile: m.nodesPath, Version: m.version, Error: m.lastErr,
 		SourceKind: m.sourceKind, SourceName: m.sourceName, Tun: m.tun, MITM: m.mitmInfo}

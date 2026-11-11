@@ -44,6 +44,7 @@ const DefaultTimeout = 10 * time.Second
 const (
 	TypeRequest  = "http-request"
 	TypeResponse = "http-response"
+	TypeCron     = "cron"
 )
 
 // Def is one executable (or explicitly non-executable) script.
@@ -60,11 +61,21 @@ type Def struct {
 	LoadErr      string // resolution/compile failure, human-readable
 	SHA256       string
 
+	CronExpr string        // type=cron: the cronexpr parameter
+	PanelRef bool          // referenced by a [Panel] entry (set by the runner)
+	sched    *cronSchedule // parsed CronExpr, nil when invalid
+
 	re *regexp.Regexp
 
 	once    sync.Once
 	prog    *goja.Program
 	compErr string
+}
+
+// IsCron reports whether this definition is a runnable cron
+// script (valid expression, code loaded, enabled).
+func (d *Def) IsCron() bool {
+	return d.Type == TypeCron && d.Enabled && d.sched != nil && d.LoadErr == "" && d.Code != ""
 }
 
 // Match reports whether the script applies to a full URL. A script
@@ -83,6 +94,8 @@ type Info struct {
 	Source    string `json:"source,omitempty"`
 	Enabled   bool   `json:"enabled"`
 	Supported bool   `json:"supported"`
+	Cron      string `json:"cron,omitempty"` // cronexpr for type=cron
+	Panel     bool   `json:"panel,omitempty"`
 	LoadErr   string `json:"load_error,omitempty"`
 	LastRun   string `json:"last_run,omitempty"` // RFC3339 or ""
 	LastOK    bool   `json:"last_ok"`
@@ -110,6 +123,7 @@ func defFromSurge(sd surge.ScriptDef) *Def {
 		// params so type/pattern still display correctly.
 		d.Type = strings.ToLower(strings.TrimSpace(sd.Params["type"]))
 		d.Pattern = sd.Params["pattern"]
+		d.CronExpr = strings.TrimSpace(sd.Params["cronexpr"])
 		d.Source = "Surge 配置"
 		d.LoadErr = "脚本源码尚未解析（请在面板重新导入配置）"
 	} else {
@@ -120,12 +134,22 @@ func defFromSurge(sd surge.ScriptDef) *Def {
 		d.LoadErr = r.LoadError
 		d.SHA256 = r.SHA256
 		d.RequiresBody = r.RequiresBody
+		d.CronExpr = r.CronExpr
 		d.Enabled = r.Enabled
 		if r.TimeoutSec > 0 {
 			d.Timeout = time.Duration(r.TimeoutSec) * time.Second
 		}
 	}
 	d.Supported = d.Type == TypeRequest || d.Type == TypeResponse
+	if d.Type == TypeCron && d.LoadErr == "" {
+		if d.CronExpr == "" {
+			d.LoadErr = "cron 脚本缺少 cronexpr 参数"
+		} else if sched, err := parseCron(d.CronExpr); err != nil {
+			d.LoadErr = "cronexpr 无法解析：" + err.Error()
+		} else {
+			d.sched = sched
+		}
+	}
 	if d.Supported && d.LoadErr == "" && d.Code == "" {
 		d.LoadErr = "脚本源码为空"
 	}
@@ -152,16 +176,18 @@ func Hash(code string) string {
 
 // Describe summarises a def list for import-report notes.
 func Describe(defs []*Def) string {
-	var live, unsup, failed int
+	var live, cron, unsup, failed int
 	for _, d := range defs {
 		switch {
-		case !d.Supported:
-			unsup++
+		case d.IsCron():
+			cron++
+		case d.Supported && d.LoadErr == "":
+			live++
 		case d.LoadErr != "":
 			failed++
 		default:
-			live++
+			unsup++
 		}
 	}
-	return fmt.Sprintf("脚本引擎：%d 个 http 脚本已上线，%d 个类型暂不支持，%d 个加载失败", live, unsup, failed)
+	return fmt.Sprintf("脚本引擎：%d 个 http 脚本已上线，%d 个 cron 脚本已排程，%d 个类型暂不支持，%d 个加载失败", live, cron, unsup, failed)
 }

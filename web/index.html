@@ -106,6 +106,7 @@
       </div>
       <div class="err" id="err"></div>
     </div>
+    <div id="panels"></div>
     <div class="sec-title">策略组</div>
     <div id="groups"><div class="hint">还没有配置：先到「设置」页导入你的 Surge 配置，节点、策略组与分流会自动生成。</div></div>
   </div>
@@ -304,6 +305,20 @@ async function loadMode(){
     const m = await j("/api/mode");
     document.querySelectorAll("#mode-seg button").forEach(b => b.classList.toggle("sel", b.dataset.mode === m.mode));
   }catch(e){ /* 内核未启动时忽略 */ }
+}
+async function loadPanels(){
+  try{
+    const list = await j("/api/panels");
+    const box = $("panels");
+    if(!list.length){ box.innerHTML = ""; return; }
+    box.innerHTML = '<div class="sec-title">面板</div>' + list.map(p =>
+      '<div class="card" style="padding:10px 16px;margin-bottom:8px">'
+      + '<div style="font-weight:600;font-size:14px">' + (p.icon ? '<span style="color:' + esc(p.icon_color || "#333") + '">' + esc(p.icon) + '</span> ' : '') + esc(p.title) + '</div>'
+      + (p.error ? '<div style="font-size:12.5px;color:#b00;padding-top:4px">' + esc(p.error) + '</div>'
+                 : '<div style="font-size:13px;line-height:1.7;white-space:pre-wrap;padding-top:4px">' + esc(p.content || "加载中…") + '</div>')
+      + (p.updated ? '<div style="font-size:11px;color:#8e8e93;padding-top:4px">更新于 ' + esc(p.updated) + '</div>' : '')
+      + '</div>').join("");
+  }catch(e){ /* 忽略 */ }
 }
 async function refreshStatus(){
   try{
@@ -542,7 +557,7 @@ $("btn-update-check").onclick = async () => {
   }catch(e){ $("update-result").textContent = String(e.message || e); }
 };
 loadAutomation();
-refreshStatus(); loadSource(); setInterval(refreshStatus, 8000); setInterval(pollTraffic, 2000);
+refreshStatus(); loadSource(); loadPanels(); setInterval(refreshStatus, 8000); setInterval(pollTraffic, 2000); setInterval(loadPanels, 30000);
 </script>
 </body>
 </html>

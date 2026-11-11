@@ -55,6 +55,7 @@ func resolveOne(sd *ScriptDef) {
 		Pattern:      strings.TrimSpace(p["pattern"]),
 		Source:       presetSource,
 		RequiresBody: truthy(p["requires-body"]),
+		CronExpr:     strings.TrimSpace(p["cronexpr"]),
 		Enabled:      true,
 	}
 	if v, ok := p["timeout"]; ok {

@@ -65,6 +65,17 @@ type GroupDef struct {
 	Tolerance int      `json:"tolerance,omitempty"`
 }
 
+// PanelDef is one [Panel] entry: a named panel rendered by
+// running the referenced script and showing its $done payload
+// (title/content/icon). UpdateInterval is the refresh cadence in
+// seconds (0 = engine default).
+type PanelDef struct {
+	Name           string `json:"name"`
+	ScriptName     string `json:"script_name"`
+	Title          string `json:"title,omitempty"`
+	UpdateInterval int    `json:"update_interval,omitempty"`
+}
+
 // EngineData preserves the engine-backed sections: nothing from
 // the user's config is thrown away, even though the
 // MITM/rewrite/script engine itself ships in v0.4.
@@ -73,6 +84,7 @@ type EngineData struct {
 	MITMParams    map[string]string `json:"mitm_params,omitempty"` // ca-p12/passphrase etc., stored locally only
 	URLRewrites   []RewriteRule     `json:"url_rewrites,omitempty"`
 	Scripts       []ScriptDef       `json:"scripts,omitempty"`
+	Panels        []PanelDef        `json:"panels,omitempty"`
 }
 
 // RewriteRule is one [URL Rewrite] line: pattern, replacement and
@@ -104,6 +116,7 @@ type ResolvedScript struct {
 	SHA256       string `json:"sha256,omitempty"`
 	TimeoutSec   int    `json:"timeout_sec,omitempty"`
 	RequiresBody bool   `json:"requires_body,omitempty"`
+	CronExpr     string `json:"cronexpr,omitempty"` // type=cron only
 	Enabled      bool   `json:"enabled"`
 	LoadError    string `json:"load_error,omitempty"`
 }
@@ -148,6 +161,7 @@ type rawConfig struct {
 	mitm     []string
 	rewrites []string
 	scripts  []rawLine
+	panels   []rawLine
 }
 
 // rawLine is one "Name = rest" entry of [Proxy] / [Proxy Group].
@@ -199,7 +213,7 @@ func parseSections(text string) *rawConfig {
 			continue
 		}
 		switch section {
-		case "Proxy", "Proxy Group", "Script":
+		case "Proxy", "Proxy Group", "Script", "Panel":
 			name, rest, ok := strings.Cut(line, "=")
 			if !ok {
 				continue
@@ -212,6 +226,8 @@ func parseSections(text string) *rawConfig {
 				rc.groups = append(rc.groups, rl)
 			case "Script":
 				rc.scripts = append(rc.scripts, rl)
+			case "Panel":
+				rc.panels = append(rc.panels, rl)
 			}
 		case "Rule":
 			rc.rules = append(rc.rules, line)
