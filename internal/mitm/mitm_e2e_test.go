@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -137,6 +138,13 @@ func curl(t *testing.T, args ...string) (string, string) {
 		t.Skip("curl not available")
 	}
 	full := append([]string{"-sS", "--max-time", "15", "-N"}, args...)
+	if runtime.GOOS == "windows" {
+		// schannel checks certificate revocation by default and
+		// hard-fails on self-signed test CAs with no CRL endpoint
+		// (curl 60 "the revocation status is unknown"); Linux
+		// OpenSSL curl does not check by default.
+		full = append(full, "--ssl-revoke-best-effort")
+	}
 	cmd := exec.Command("curl", full...)
 	cmd.Env = append(os.Environ(), "no_proxy=", "NO_PROXY=")
 	var out, serr strings.Builder
