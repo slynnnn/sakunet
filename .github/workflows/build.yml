@@ -90,7 +90,9 @@ jobs:
         run: |
           $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
           if (-not (Test-Path $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
-          & $edge --headless=new --disable-gpu --hide-scrollbars --screenshot=panel-home.png --window-size=900,1400 http://127.0.0.1:18090/
+          $udd = Join-Path $env:RUNNER_TEMP "edge-udd"
+          & $edge --headless=new --disable-gpu --hide-scrollbars --no-first-run --user-data-dir=$udd --virtual-time-budget=8000 --screenshot=panel-home.png --window-size=900,1400 http://127.0.0.1:18090/
+          foreach ($i in 1..30) { if (Test-Path panel-home.png) { break }; Start-Sleep -Seconds 1 }
           if (-not (Test-Path panel-home.png)) { throw "screenshot was not produced" }
       - uses: actions/upload-artifact@v4
         if: always()
