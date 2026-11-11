@@ -58,16 +58,45 @@ func (m *Manager) Tun() bool {
 
 // SetTun persists the TUN preference and restarts the core if it is
 // running (the inbound set is part of the generated config).
+//
+// Safety contract (TUN touches the machine's routing, so a failed
+// toggle must never strand the user): enabling is refused up front
+// when the platform blocker says so (Windows: not elevated), and
+// if the restart with the new setting fails, the previous setting
+// is restored and the core is restarted back — the toggle either
+// fully applies or fully rolls back, and the returned error says
+// which of the two happened.
 func (m *Manager) SetTun(on bool) error {
+	if on {
+		if msg := tunAdminBlocker(); msg != "" {
+			return fmt.Errorf("%s", msg)
+		}
+	}
 	m.mu.Lock()
+	old := m.tun
 	m.tun = on
 	running := m.cmd != nil
 	m.mu.Unlock()
 	if err := m.savePrefs(); err != nil {
+		m.mu.Lock()
+		m.tun = old
+		m.mu.Unlock()
 		return err
 	}
-	if running {
-		return m.Restart()
+	if !running {
+		return nil
+	}
+	if err := m.Restart(); err != nil {
+		// Roll back: restore the old preference and restart with
+		// the previous (known-good) configuration.
+		m.mu.Lock()
+		m.tun = old
+		m.mu.Unlock()
+		_ = m.savePrefs()
+		if rbErr := m.Restart(); rbErr != nil {
+			return fmt.Errorf("切换 TUN 失败且回滚重启也失败，内核当前未运行：切换错误：%v；回滚错误：%w", err, rbErr)
+		}
+		return fmt.Errorf("切换 TUN 失败，已回滚到原设置（内核按原配置运行中）：%w", err)
 	}
 	return nil
 }

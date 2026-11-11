@@ -12,8 +12,11 @@ Write-Host "Downloading $Url"
 Invoke-WebRequest -Uri $Url -OutFile $Zip
 Expand-Archive -Path $Zip -DestinationPath $Tmp -Force
 # Copy sing-box.exe AND its bundled libraries (libcronet.dll is required
-# by the Naive outbound) next to SakuNet.exe.
+# by the Naive outbound, wintun.dll by the TUN inbound) next to SakuNet.exe.
 Copy-Item (Join-Path $Tmp "$Name\sing-box.exe") $Dir -Force
 Get-ChildItem (Join-Path $Tmp $Name) -Filter *.dll | Copy-Item -Destination $Dir -Force
+if (-not (Test-Path (Join-Path $Dir "wintun.dll"))) {
+    Write-Warning "wintun.dll not found in the sing-box package: TUN mode will not work, everything else is unaffected."
+}
 & (Join-Path $Dir "sing-box.exe") version
 Write-Host "Core installed in $Dir"

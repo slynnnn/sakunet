@@ -32,13 +32,15 @@
 | Surge [Proxy Group] | ✅ 已实现 | select→selector；url-test/fallback→urltest；嵌套组/include/regex 筛选按语义展开 |
 | 组 smart / load-balance | ⚠️ 近似 | smart→urltest（最低延迟）；load-balance→selector（sing-box 无对应物，导入报告注明） |
 | Surge [Rule] | ✅ 已实现 | DOMAIN 系 / IP-CIDR / SRC-IP / DEST-PORT / PROTOCOL / PROCESS-NAME；RULE-SET 指向 surge-rules 仓时映射到 sing-box 格式 |
-| 外部 RULE-SET、USER-AGENT、GEOIP、URL-REGEX、逻辑复合规则 | ❌ 不支持 | 平台无对应物，逐条列入「未迁移清单」，不静默丢弃 |
+| 远程 RULE-SET（任意来源） | ✅ 已实现（v1.2） | URL 直供 sing-box 格式（.json/.srs）→ 远程规则集，24h 自动更新；纯文本列表（Surge/Clash 格式）→ 导入时抓取解析为内嵌集（导入时快照、重新导入刷新），拉取失败逐条报告并剔除引用规则 |
+| GEOIP | ✅ 已实现（v1.2） | 映射到 SagerNet sing-geoip 远程规则集（geoip-&lt;国家码&gt;.srs，自动更新） |
+| USER-AGENT、URL-REGEX、逻辑复合规则 | ❌ 不支持 | sing-box 路由层无对应物，逐条列入「未迁移清单」，不静默丢弃 |
 | MITM 引擎 | ✅ 已实现 | 仅 [MITM] hostname 命中才解密；CA 用导入配置里已有的 p12（本机内存解码）；面板可下载 CA 证书并给出 Windows 安装指引 |
 | URL Rewrite 引擎 | ✅ 已实现 | 302/307 重定向、reject 类（reject/reject-200/-img/-dict/-array）、header 类（请求头/响应头的 set/add/del，语法见引擎说明）；其余类型逐条标「不支持」并在设置页列出 |
 | 模块 .sgmodule | ✅ 已实现（部分） | 内嵌 MITM hostname、重写规则与脚本定义并入引擎生效（脚本见下行）；[Rule]/[Proxy] 段不并入，逐项标注 |
 | Surge/QX 的 JS 脚本引擎 | ✅ 已实现（子集） | goja 运行时；`http-request` / `http-response` 脚本在 MITM 解密流量上执行（去广告主力场景）；API 子集见下文「脚本引擎子集边界」；cron/event 等其他类型保留并标注「暂不支持」 |
 | 分享链接导入 | ✅ 已实现 | snell://、anytls://、hysteria2://（hy2://）、ss://（含 SIP002/老式）、trojan://、vmess://、vless:// 单链接与订阅 URL（整包 base64 自动识别） |
-| TUN 模式 | ✅ 已实现 | 设置页开关；Windows 需管理员，设置页有一键 UAC 提权重启 |
+| TUN 模式 | ✅ 已实现 | 设置页开关；Windows 需管理员（未提权时开关直接拒绝并提示，不保存坏偏好），设置页有一键 UAC 提权重启；切换后重启失败自动回滚原设置并恢复内核运行（单测覆盖）。**验证边界**：配置生成经 sing-box check＋单测；本开发 VM 无建 TUN 接口权限（TUNSETIFF 被沙箱拒），未做接口级实测；Windows 全路由（auto_route）实测与 CI 内的 TUN 有限实测**均未做**，不宣称已验 |
 | 系统托盘 | ✅ 已实现（Windows） | 开关内核、模式三段、打开面板、退出 |
 | 系统代理 | ✅ 已实现（Windows） | 写 HKCU 注册表；MITM 引擎运行时自动指向引擎层 |
 | 活动记录 | ✅ 已实现 | 目标主机 / 规则命中 / 出口链 / 流量 / 起始时间 |
