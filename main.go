@@ -440,7 +440,7 @@ func main() {
 			errJSON(w, err)
 			return
 		}
-		rep, err := mgr.ImportSurge(safeDisplayName(header.Filename), data)
+		rep, err := mgr.ImportSurge(safeDisplayName(header.Filename), data, r.FormValue("name"))
 		if rep != nil {
 			writeJSON(w, 200, rep)
 			return
@@ -459,6 +459,50 @@ func main() {
 			"at":     st.SourceAt,
 			"report": mgr.ImportReport(),
 		})
+	})
+	mux.HandleFunc("/api/profiles", func(w http.ResponseWriter, r *http.Request) {
+		list, err := mgr.Profiles()
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, list)
+	})
+	mux.HandleFunc("/api/profiles/switch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			errJSON(w, fmt.Errorf("POST required"))
+			return
+		}
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+			errJSON(w, err)
+			return
+		}
+		if err := mgr.SwitchProfile(body.ID); err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]string{"ok": "1"})
+	})
+	mux.HandleFunc("/api/profiles/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			errJSON(w, fmt.Errorf("POST required"))
+			return
+		}
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+			errJSON(w, err)
+			return
+		}
+		if err := mgr.DeleteProfile(body.ID); err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]string{"ok": "1"})
 	})
 	mux.HandleFunc("/api/automation", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, mgr.Automation())

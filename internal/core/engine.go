@@ -282,7 +282,7 @@ func (m *Manager) ImportNodes(nodes []*config.Node) (int, error) {
 			imp.Report.NodesOK += added
 			imp.Report.Notes = append(imp.Report.Notes,
 				fmt.Sprintf("分享链接/订阅导入：新增节点 %d 个", added))
-			if err := surge.SaveImported(imp, m.importedPath()); err != nil {
+			if err := m.saveActiveImported(imp); err != nil {
 				return 0, err
 			}
 		}
@@ -348,7 +348,7 @@ func (m *Manager) ImportModule(name string, data []byte) (*surge.ModuleResult, e
 	mr := surge.ParseModule(name, data)
 	imp.MergeModule(mr)
 	mr.Notes = append(mr.Notes, imp.ResolveScripts()...)
-	if err := surge.SaveImported(imp, m.importedPath()); err != nil {
+	if err := m.saveActiveImported(imp); err != nil {
 		return nil, err
 	}
 	m.mu.Lock()

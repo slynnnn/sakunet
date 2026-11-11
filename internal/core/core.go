@@ -47,6 +47,7 @@ type Manager struct {
 	sourceAt     time.Time
 	tun          bool
 	prefs        prefs
+	activeProfile string
 	bgOnce       sync.Once
 	mitmSrv      *mitm.Server
 	mitmInfo     *MITMInfo
@@ -59,6 +60,7 @@ type sourceMeta struct {
 	Kind       string    `json:"kind"`
 	SourceName string    `json:"source_name,omitempty"`
 	At         time.Time `json:"at,omitempty"`
+	ProfileID  string    `json:"profile_id,omitempty"`
 }
 
 // New resolves the app directory (executable dir, falling back to cwd)
@@ -100,9 +102,11 @@ func New(nodesPath string) (*Manager, error) {
 				m.sourceKind = "surge"
 				m.sourceName = meta.SourceName
 				m.sourceAt = meta.At
+				m.activeProfile = meta.ProfileID
 			}
 		}
 	}
+	m.ensureProfiles()
 	return m, nil
 }
 
@@ -133,12 +137,12 @@ func (m *Manager) generate() error {
 	return os.WriteFile(m.configPath(), append(raw, '\n'), 0o644)
 }
 
-// ImportSurge parses an uploaded Surge .conf, persists it as the
-// active configuration source (imported.json) and restarts the core
-// if it is running. The hand-written nodes.json is left untouched;
-// switching back is a matter of removing the source meta (settings
-// page shows which source is active).
-func (m *Manager) ImportSurge(origName string, data []byte) (*surge.Report, error) {
+// ImportSurge parses an uploaded Surge .conf, stores it as a new
+// named profile (v1.2: imports no longer overwrite each other),
+// makes it the active configuration source and restarts the core
+// if it is running. profileName empty = the file's own name. The
+// hand-written nodes.json is left untouched.
+func (m *Manager) ImportSurge(origName string, data []byte, profileName ...string) (*surge.Report, error) {
 	imp, err := surge.Parse(origName, data)
 	if err != nil {
 		return nil, err
@@ -156,6 +160,14 @@ func (m *Manager) ImportSurge(origName string, data []byte) (*surge.Report, erro
 		imp.Report.Notes = append(imp.Report.Notes,
 			script.Describe(script.FromEngine(&imp.Engine)))
 	}
+	name := origName
+	if len(profileName) > 0 && profileName[0] != "" {
+		name = profileName[0]
+	}
+	pid, err := m.addProfile(name, imp)
+	if err != nil {
+		return nil, err
+	}
 	if err := surge.SaveImported(imp, m.importedPath()); err != nil {
 		return nil, err
 	}
@@ -165,7 +177,7 @@ func (m *Manager) ImportSurge(origName string, data []byte) (*surge.Report, erro
 	m.sourceAt = imp.ImportedAt
 	running := m.cmd != nil
 	m.mu.Unlock()
-	meta := sourceMeta{Kind: "surge", SourceName: origName, At: imp.ImportedAt}
+	meta := sourceMeta{Kind: "surge", SourceName: origName, At: imp.ImportedAt, ProfileID: pid}
 	if raw, err := json.Marshal(meta); err == nil {
 		_ = os.WriteFile(m.sourceMetaPath(), raw, 0o644)
 	}
