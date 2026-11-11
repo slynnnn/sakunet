@@ -1,6 +1,8 @@
 package surge
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -348,8 +350,36 @@ type ruleConverter struct {
 	resolve   func(string) (string, bool)
 	isReject  func(string) bool
 	extraSets map[string]string // mapped URL -> rule_set tag
+	textSets  map[string]string // text-list URL -> rule_set tag (fetch+convert at resolve time)
+	geoSets   map[string]bool   // geoip codes already defined
 	finalTag  string
 	finalPol  string
+}
+
+// deriveRuleSetTag builds a stable, collision-resistant rule-set
+// tag from a URL: rs-<basename>-<short hash of the full URL>.
+func deriveRuleSetTag(rawURL string) string {
+	base := rawURL
+	if i := strings.Index(base, "://"); i >= 0 {
+		base = base[i+3:]
+	}
+	if i := strings.IndexAny(base, "?#"); i >= 0 {
+		base = base[:i]
+	}
+	parts := strings.Split(strings.TrimSuffix(base, "/"), "/")
+	name := parts[len(parts)-1]
+	name = strings.TrimSuffix(strings.TrimSuffix(name, ".json"), ".srs")
+	name = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, name)
+	if name == "" || name == "-" {
+		name = "set"
+	}
+	sum := sha256.Sum256([]byte(rawURL))
+	return "rs-" + name + "-" + hex.EncodeToString(sum[:3])
 }
 
 // mapSurgeRulesURL maps a slynnnn/surge-rules list URL to its
@@ -403,20 +433,88 @@ func (c *ruleConverter) policyRule(fields map[string]any, policy, desc string) {
 	c.rep.RulesOK++
 }
 
-// ruleSetRule handles RULE-SET / DOMAIN-SET lines.
+// ruleSetRule handles RULE-SET / DOMAIN-SET lines. Three shapes
+// of external reference are supported:
+//   - slynnnn/surge-rules lists: mapped to the repo's own sing-box
+//     source-format counterparts (remote, auto-updated).
+//   - URLs serving sing-box rule-set formats directly (.json
+//     source / .srs binary): referenced as remote rule-sets with
+//     an update interval — sing-box fetches and refreshes them.
+//   - Any other URL: assumed to be a plain-text Surge/Clash list.
+//     sing-box has no remote consumer for that format, so the rule
+//     is emitted against a derived tag and the reference is queued
+//     in PendingTextSets; ResolveRuleSets fetches and converts it
+//     to an inline rule-set at import time (and reports failures
+//     per line, dropping the rule).
 func (c *ruleConverter) ruleSetRule(url, policy, desc string) {
 	if strings.EqualFold(url, "LAN") {
 		c.policyRule(map[string]any{"ip_is_private": true}, policy, desc)
 		return
 	}
-	sbURL, tag, ok := mapSurgeRulesURL(url)
-	if !ok {
-		c.unmigrated(desc, "外部规则集（非 surge-rules 仓），sing-box 无同源格式，未转换")
+	if sbURL, tag, ok := mapSurgeRulesURL(url); ok {
+		if _, dup := c.extraSets[url]; !dup {
+			c.extraSets[url] = tag
+			c.imp.ExtraRuleSets = append(c.imp.ExtraRuleSets, config.RemoteRuleSet(tag, sbURL))
+		}
+		c.policyRule(map[string]any{"rule_set": []string{tag}}, policy, desc)
 		return
 	}
-	if _, dup := c.extraSets[url]; !dup {
-		c.extraSets[url] = tag
-		c.imp.ExtraRuleSets = append(c.imp.ExtraRuleSets, config.RemoteRuleSet(tag, sbURL))
+	if !isHTTPURL(url) {
+		c.unmigrated(desc, "规则集引用不是 http(s) URL，无法转换")
+		return
+	}
+	lower := strings.ToLower(url)
+	switch {
+	case strings.HasSuffix(lower, ".srs"):
+		tag := deriveRuleSetTag(url)
+		if _, dup := c.extraSets[url]; !dup {
+			c.extraSets[url] = tag
+			rs := config.RemoteRuleSet(tag, url)
+			rs["format"] = "binary"
+			c.imp.ExtraRuleSets = append(c.imp.ExtraRuleSets, rs)
+		}
+		c.policyRule(map[string]any{"rule_set": []string{tag}}, policy, desc)
+	case strings.HasSuffix(lower, ".json"):
+		tag := deriveRuleSetTag(url)
+		if _, dup := c.extraSets[url]; !dup {
+			c.extraSets[url] = tag
+			c.imp.ExtraRuleSets = append(c.imp.ExtraRuleSets, config.RemoteRuleSet(tag, url))
+		}
+		c.policyRule(map[string]any{"rule_set": []string{tag}}, policy, desc)
+	default:
+		tag, dup := c.textSets[url]
+		if !dup {
+			tag = deriveRuleSetTag(url)
+			c.textSets[url] = tag
+			c.imp.PendingTextSets = append(c.imp.PendingTextSets,
+				TextSetRef{Tag: tag, URL: url, Desc: desc})
+		}
+		c.policyRule(map[string]any{"rule_set": []string{tag}}, policy, desc)
+	}
+}
+
+// geoipRule maps GEOIP,<code>,<policy> onto a remote rule-set
+// from the SagerNet sing-geoip dataset (the sing-box-native
+// replacement for the removed geoip route field).
+func (c *ruleConverter) geoipRule(code, policy, desc string) {
+	code = strings.ToLower(strings.TrimSpace(code))
+	valid := len(code) >= 2
+	for _, r := range code {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+			valid = false
+		}
+	}
+	if !valid {
+		c.unmigrated(desc, "GEOIP 国家代码格式无法识别")
+		return
+	}
+	tag := "geoip-" + code
+	if !c.geoSets[code] {
+		c.geoSets[code] = true
+		rs := config.RemoteRuleSet(tag,
+			"https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-"+code+".srs")
+		rs["format"] = "binary"
+		c.imp.ExtraRuleSets = append(c.imp.ExtraRuleSets, rs)
 	}
 	c.policyRule(map[string]any{"rule_set": []string{tag}}, policy, desc)
 }
@@ -508,10 +606,11 @@ func (c *ruleConverter) convert(line string) {
 		}
 		c.policyRule(map[string]any{"process_name": []string{fields[1]}}, fields[2], desc+" → "+fields[2])
 	case "GEOIP":
-		if len(fields) >= 3 {
-			desc += " → " + fields[2]
+		if len(fields) < 3 {
+			c.unmigrated(desc, "字段不足")
+			return
 		}
-		c.unmigrated(desc, "sing-box 1.14 已移除 geoip 路由字段，需专用 geoip 规则集，未转换")
+		c.geoipRule(fields[1], fields[2], desc+" → "+fields[2])
 	case "USER-AGENT":
 		if len(fields) >= 3 {
 			desc += " → " + fields[2]

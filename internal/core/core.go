@@ -147,6 +147,9 @@ func (m *Manager) ImportSurge(origName string, data []byte) (*surge.Report, erro
 	// Resolve script bodies (download remote script-paths, cache +
 	// fingerprint them) so the JS engine can run offline afterwards.
 	imp.Report.Notes = append(imp.Report.Notes, imp.ResolveScripts()...)
+	// Fetch + convert plain-text rule-set references into inline
+	// rule-sets (failures drop their rules with a report entry).
+	imp.Report.Notes = append(imp.Report.Notes, imp.ResolveRuleSets()...)
 	if len(imp.Engine.Scripts) > 0 {
 		imp.Report.Notes = append(imp.Report.Notes,
 			script.Describe(script.FromEngine(&imp.Engine)))

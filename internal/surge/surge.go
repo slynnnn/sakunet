@@ -112,6 +112,17 @@ type ResolvedScript struct {
 // Rules and ExtraRuleSets are raw sing-box JSON fragments; they are
 // decoded with json.Number semantics on load (see LoadImported) so
 // integer fields survive the round trip.
+// TextSetRef is one RULE-SET / DOMAIN-SET reference whose URL
+// serves a plain-text list (Surge/Clash classical format). sing-box
+// cannot consume that format remotely, so the list is fetched and
+// converted to an inline rule-set at import time (see
+// resolve_rulesets.go). Desc is the credential-free report label.
+type TextSetRef struct {
+	Tag  string `json:"tag"`
+	URL  string `json:"url"`
+	Desc string `json:"desc"`
+}
+
 type Imported struct {
 	SourceName    string           `json:"source_name"`
 	ImportedAt    time.Time        `json:"imported_at"`
@@ -119,6 +130,10 @@ type Imported struct {
 	Groups        []GroupDef       `json:"groups"`
 	Rules         []map[string]any `json:"rules"`
 	ExtraRuleSets []map[string]any `json:"extra_rule_sets,omitempty"`
+	// PendingTextSets holds text-format rule-set references that
+	// still need fetch+convert (ResolveRuleSets). Empty once
+	// resolved; leftovers mean resolution never ran (offline parse).
+	PendingTextSets []TextSetRef `json:"pending_text_sets,omitempty"`
 	Final         string           `json:"final,omitempty"`
 	Engine        EngineData       `json:"engine"`
 	Modules       []ModuleRecord   `json:"modules,omitempty"`
@@ -339,6 +354,8 @@ func Parse(sourceName string, data []byte) (*Imported, error) {
 		imp: imp, rep: rep,
 		resolve: resolvePolicy, isReject: isReject,
 		extraSets: map[string]string{},
+		textSets:  map[string]string{},
+		geoSets:   map[string]bool{},
 	}
 	for _, rl := range rc.rules {
 		conv.convert(rl)

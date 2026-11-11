@@ -75,6 +75,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "surge2json:", err)
 			os.Exit(1)
 		}
+		// Same resolution the panel import performs, so the offline
+		// build is complete (text rule-sets fetched + inlined).
+		imp.Report.Notes = append(imp.Report.Notes, imp.ResolveRuleSets()...)
 		// Always build in memory (validates every converted outbound
 		// and rule); only write the config when an output was given.
 		cfg, err := surge.BuildImported(imp, "rule")

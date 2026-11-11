@@ -30,13 +30,19 @@ func TestParseFixture(t *testing.T) {
 	if rep.GroupsOK != 2 {
 		t.Errorf("groups ok = %d, want 2", rep.GroupsOK)
 	}
-	// 3 DOMAIN-family + 2 mapped RULE-SET + IP-CIDR + DEST-PORT + FINAL.
-	if rep.RulesOK != 8 {
-		t.Errorf("rules ok = %d, want 8", rep.RulesOK)
+	// 3 DOMAIN-family + 2 mapped RULE-SET + 1 text RULE-SET (rule
+	// emitted, fetch deferred to ResolveRuleSets) + IP-CIDR +
+	// DEST-PORT + FINAL.
+	if rep.RulesOK != 9 {
+		t.Errorf("rules ok = %d, want 9", rep.RulesOK)
 	}
-	// External RULE-SET + USER-AGENT are not migrated.
-	if len(rep.Unmigrated) != 2 {
-		t.Errorf("unmigrated = %d (%v), want 2", len(rep.Unmigrated), rep.Unmigrated)
+	// Only USER-AGENT is unmigrated at parse time; the external
+	// text RULE-SET is pending resolution instead.
+	if len(rep.Unmigrated) != 1 {
+		t.Errorf("unmigrated = %d (%v), want 1", len(rep.Unmigrated), rep.Unmigrated)
+	}
+	if len(imp.PendingTextSets) != 1 {
+		t.Errorf("pending text sets = %d, want 1", len(imp.PendingTextSets))
 	}
 	snell := imp.Nodes[0]
 	if snell.Type != "snell" || snell.Version != 6 || snell.Mode != "default" || !snell.TFO {
@@ -107,10 +113,12 @@ func TestBuildFixture(t *testing.T) {
 			t.Errorf("built-in group %v must not appear in imported config", tag)
 		}
 	}
-	// Route rules: sniff + hijack-dns + the 7 converted rules.
+	// Route rules: sniff + hijack-dns + the 8 converted rules (the
+	// text RULE-SET line is emitted too; its set is inlined by
+	// ResolveRuleSets before a real build).
 	rules := route["rules"].([]any)
-	if len(rules) != 9 {
-		t.Errorf("route rules = %d, want 9 (2 plumbing + 7 converted)", len(rules))
+	if len(rules) != 10 {
+		t.Errorf("route rules = %d, want 10 (2 plumbing + 8 converted)", len(rules))
 	}
 	if _, ok := rules[2].(map[string]any)["domain"]; !ok {
 		t.Errorf("first converted rule should be the DOMAIN rule, got %v", rules[2])
