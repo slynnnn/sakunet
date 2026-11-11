@@ -1,0 +1,343 @@
+{
+  "dns": {
+    "final": "dns-remote",
+    "rules": [
+      {
+        "action": "route",
+        "domain": [
+          "raw.githubusercontent.com"
+        ],
+        "server": "dns-local"
+      },
+      {
+        "action": "route",
+        "rule_set": [
+          "china"
+        ],
+        "server": "dns-local"
+      }
+    ],
+    "servers": [
+      {
+        "detour": "节点选择",
+        "server": "1.1.1.1",
+        "tag": "dns-remote",
+        "type": "https"
+      },
+      {
+        "server": "223.5.5.5",
+        "tag": "dns-local",
+        "type": "https"
+      }
+    ],
+    "strategy": "prefer_ipv4"
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "cache.db"
+    },
+    "clash_api": {
+      "default_mode": "rule",
+      "external_controller": "127.0.0.1:9090"
+    }
+  },
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "listen_port": 2080,
+      "tag": "mixed-in",
+      "type": "mixed"
+    }
+  ],
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "outbounds": [
+    {
+      "default": "示例-大阪-Snell",
+      "outbounds": [
+        "示例-大阪-Snell",
+        "示例-香港-AnyTLS",
+        "示例-东京-Hysteria2",
+        "示例-美国-Naive",
+        "示例-VLESS-Reality",
+        "示例-VMess",
+        "示例-Trojan",
+        "示例-Shadowsocks",
+        "direct"
+      ],
+      "tag": "节点选择",
+      "type": "selector"
+    },
+    {
+      "default": "示例-大阪-Snell",
+      "outbounds": [
+        "示例-大阪-Snell",
+        "示例-香港-AnyTLS",
+        "示例-东京-Hysteria2",
+        "示例-美国-Naive",
+        "示例-VLESS-Reality",
+        "示例-VMess",
+        "示例-Trojan",
+        "示例-Shadowsocks"
+      ],
+      "tag": "AI",
+      "type": "selector"
+    },
+    {
+      "default": "示例-大阪-Snell",
+      "outbounds": [
+        "示例-大阪-Snell",
+        "示例-香港-AnyTLS",
+        "示例-东京-Hysteria2",
+        "示例-美国-Naive",
+        "示例-VLESS-Reality",
+        "示例-VMess",
+        "示例-Trojan",
+        "示例-Shadowsocks"
+      ],
+      "tag": "流媒体",
+      "type": "selector"
+    },
+    {
+      "default": "示例-大阪-Snell",
+      "outbounds": [
+        "示例-大阪-Snell",
+        "示例-香港-AnyTLS",
+        "示例-东京-Hysteria2",
+        "示例-美国-Naive",
+        "示例-VLESS-Reality",
+        "示例-VMess",
+        "示例-Trojan",
+        "示例-Shadowsocks"
+      ],
+      "tag": "社交",
+      "type": "selector"
+    },
+    {
+      "default": "示例-大阪-Snell",
+      "outbounds": [
+        "示例-大阪-Snell",
+        "示例-香港-AnyTLS",
+        "示例-东京-Hysteria2",
+        "示例-美国-Naive",
+        "示例-VLESS-Reality",
+        "示例-VMess",
+        "示例-Trojan",
+        "示例-Shadowsocks"
+      ],
+      "tag": "漏网之鱼",
+      "type": "selector"
+    },
+    {
+      "mode": "default",
+      "psk": "example-psk-please-change-1234",
+      "server": "192.0.2.11",
+      "server_port": 17886,
+      "tag": "示例-大阪-Snell",
+      "tcp_fast_open": true,
+      "type": "snell",
+      "version": 6
+    },
+    {
+      "password": "example-password",
+      "server": "192.0.2.12",
+      "server_port": 10080,
+      "tag": "示例-香港-AnyTLS",
+      "tls": {
+        "enabled": true,
+        "insecure": true,
+        "server_name": "example.com"
+      },
+      "type": "anytls"
+    },
+    {
+      "password": "example-password",
+      "server": "192.0.2.13",
+      "server_port": 443,
+      "tag": "示例-东京-Hysteria2",
+      "tls": {
+        "enabled": true,
+        "server_name": "example.com"
+      },
+      "type": "hysteria2"
+    },
+    {
+      "password": "example-password",
+      "server": "192.0.2.14",
+      "server_port": 443,
+      "tag": "示例-美国-Naive",
+      "tls": {
+        "enabled": true,
+        "server_name": "example.com"
+      },
+      "type": "naive",
+      "username": "example-user"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "192.0.2.15",
+      "server_port": 443,
+      "tag": "示例-VLESS-Reality",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "M0fieUO479vVYvOvyYZZf5IbLyIka2vsRfKkXA4MAho",
+          "short_id": "0123456789abcdef"
+        },
+        "server_name": "example.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "alter_id": 0,
+      "security": "auto",
+      "server": "192.0.2.16",
+      "server_port": 443,
+      "tag": "示例-VMess",
+      "tls": {
+        "enabled": true,
+        "server_name": "example.com"
+      },
+      "type": "vmess",
+      "uuid": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "password": "example-password",
+      "server": "192.0.2.17",
+      "server_port": 443,
+      "tag": "示例-Trojan",
+      "tls": {
+        "enabled": true,
+        "server_name": "example.com"
+      },
+      "type": "trojan"
+    },
+    {
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "gKNs401BGpswwlKp539csQ==",
+      "server": "192.0.2.18",
+      "server_port": 8388,
+      "tag": "示例-Shadowsocks",
+      "type": "shadowsocks"
+    },
+    {
+      "tag": "direct",
+      "type": "direct"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": {
+      "server": "dns-local"
+    },
+    "final": "漏网之鱼",
+    "rule_set": [
+      {
+        "download_detour": "direct",
+        "format": "source",
+        "tag": "ads",
+        "type": "remote",
+        "update_interval": "24h",
+        "url": "https://raw.githubusercontent.com/slynnnn/surge-rules/main/platforms/singbox/merged/ads.json"
+      },
+      {
+        "download_detour": "direct",
+        "format": "source",
+        "tag": "ai",
+        "type": "remote",
+        "update_interval": "24h",
+        "url": "https://raw.githubusercontent.com/slynnnn/surge-rules/main/platforms/singbox/merged/ai.json"
+      },
+      {
+        "download_detour": "direct",
+        "format": "source",
+        "tag": "streaming",
+        "type": "remote",
+        "update_interval": "24h",
+        "url": "https://raw.githubusercontent.com/slynnnn/surge-rules/main/platforms/singbox/merged/streaming.json"
+      },
+      {
+        "download_detour": "direct",
+        "format": "source",
+        "tag": "social",
+        "type": "remote",
+        "update_interval": "24h",
+        "url": "https://raw.githubusercontent.com/slynnnn/surge-rules/main/platforms/singbox/merged/social.json"
+      },
+      {
+        "download_detour": "direct",
+        "format": "source",
+        "tag": "global",
+        "type": "remote",
+        "update_interval": "24h",
+        "url": "https://raw.githubusercontent.com/slynnnn/surge-rules/main/platforms/singbox/merged/global.json"
+      },
+      {
+        "download_detour": "direct",
+        "format": "source",
+        "tag": "china",
+        "type": "remote",
+        "update_interval": "24h",
+        "url": "https://raw.githubusercontent.com/slynnnn/surge-rules/main/platforms/singbox/merged/china.json"
+      }
+    ],
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "action": "hijack-dns",
+        "protocol": "dns"
+      },
+      {
+        "action": "reject",
+        "rule_set": [
+          "ads"
+        ]
+      },
+      {
+        "outbound": "AI",
+        "rule_set": [
+          "ai"
+        ]
+      },
+      {
+        "outbound": "流媒体",
+        "rule_set": [
+          "streaming"
+        ]
+      },
+      {
+        "outbound": "社交",
+        "rule_set": [
+          "social"
+        ]
+      },
+      {
+        "outbound": "节点选择",
+        "rule_set": [
+          "global"
+        ]
+      },
+      {
+        "outbound": "direct",
+        "rule_set": [
+          "china"
+        ]
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "direct"
+      }
+    ]
+  }
+}

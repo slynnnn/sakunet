@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SakuNet</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:#f2f2f7;color:#1c1c1e;margin:0;padding:0 0 76px}
+  .wrap{max-width:680px;margin:0 auto;padding:16px 14px}
+  h1.app{font-size:15px;color:#8e8e93;font-weight:600;letter-spacing:.06em;margin:6px 2px 10px}
+  .card{background:#fff;border-radius:16px;padding:16px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  /* 状态卡 */
+  .status-top{display:flex;align-items:center;gap:12px}
+  .status-dot{width:11px;height:11px;border-radius:50%;background:#c7c7cc;flex:none}
+  .status-dot.on{background:#34c759}
+  .status-main{flex:1;min-width:0}
+  .status-state{font-size:17px;font-weight:600}
+  .status-exit{font-size:13px;color:#8e8e93;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* iOS 开关 */
+  .switch{position:relative;width:52px;height:32px;flex:none;cursor:pointer}
+  .switch input{opacity:0;width:0;height:0}
+  .track{position:absolute;inset:0;background:#e9e9ea;border-radius:999px;transition:.2s}
+  .track:before{content:"";position:absolute;width:28px;height:28px;left:2px;top:2px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:.2s}
+  .switch input:checked + .track{background:#34c759}
+  .switch input:checked + .track:before{transform:translateX(20px)}
+  /* 速率 */
+  .rates{display:flex;gap:18px;margin-top:12px;font-size:13px;color:#3a3a3c}
+  .rates span b{font-variant-numeric:tabular-nums;font-weight:600}
+  /* 三段模式 */
+  .seg{display:flex;background:#e9e9ea;border-radius:10px;padding:2px;margin-top:14px}
+  .seg button{flex:1;border:0;background:transparent;padding:7px 0;font-size:13.5px;border-radius:8px;cursor:pointer;color:#1c1c1e}
+  .seg button.sel{background:#fff;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+  /* 分组标题 */
+  .sec-title{font-size:13px;color:#8e8e93;margin:18px 4px 8px}
+  /* 策略组卡片 */
+  .group{padding:0;overflow:hidden}
+  .g-head{display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer}
+  .g-icon{width:30px;height:30px;border-radius:8px;background:#f2f2f7;display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
+  .g-name{font-weight:600;font-size:15.5px}
+  .g-cur{margin-left:auto;text-align:right;min-width:0}
+  .g-cur-name{font-size:13.5px;color:#3a3a3c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+  .g-tools{display:flex;align-items:center;gap:8px;flex:none}
+  .test-btn{border:0;background:#f2f2f7;color:#007aff;font-size:12.5px;padding:5px 10px;border-radius:999px;cursor:pointer}
+  .chev{color:#c7c7cc;font-size:13px;transition:.2s}
+  .group.open .chev{transform:rotate(90deg)}
+  .g-body{display:none;border-top:.5px solid #e5e5ea}
+  .group.open .g-body{display:block}
+  /* 节点行（QX 风） */
+  .node{display:flex;align-items:center;gap:9px;padding:11px 16px;cursor:pointer;border-top:.5px solid #f2f2f7}
+  .node:first-child{border-top:0}
+  .node.sel{background:#eef5ff}
+  .node .flag{font-size:17px;flex:none}
+  .node .nname{font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ptag{font-size:10.5px;color:#8e8e93;border:.5px solid #d1d1d6;border-radius:4px;padding:1px 5px;flex:none;text-transform:lowercase}
+  .node .sp{flex:1}
+  .capsule{font-size:11.5px;font-weight:600;padding:2.5px 8px;border-radius:999px;font-variant-numeric:tabular-nums;flex:none;background:#e9e9ea;color:#8e8e93}
+  .capsule.g{background:#e3f7e8;color:#1d9e4b}
+  .capsule.y{background:#fdf3d8;color:#b8860b}
+  .capsule.r{background:#fde4e4;color:#d70015}
+  .capsule.gr{background:#e9e9ea;color:#8e8e93}
+  .check{color:#007aff;font-weight:700;flex:none;width:16px;text-align:center}
+  /* 设置行 */
+  .row{display:flex;align-items:center;padding:12px 16px;border-top:.5px solid #f2f2f7;font-size:14.5px}
+  .row:first-child{border-top:0}
+  .row .val{margin-left:auto;color:#8e8e93;font-size:13px;text-align:right;max-width:55%;word-break:break-all}
+  .row button{margin-left:auto}
+  .btn{border:0;background:#007aff;color:#fff;font-size:13.5px;padding:7px 14px;border-radius:8px;cursor:pointer}
+  .btn.gray{background:#e9e9ea;color:#1c1c1e}
+  .err{color:#d70015;font-size:13px;white-space:pre-wrap;margin:8px 2px}
+  .hint{font-size:12.5px;color:#8e8e93;margin:6px 4px}
+  /* 底部标签栏（QX 风） */
+  .tabbar{position:fixed;left:0;right:0;bottom:0;background:rgba(255,255,255,.92);backdrop-filter:blur(12px);border-top:.5px solid #d1d1d6;display:flex;z-index:10}
+  .tabbar button{flex:1;border:0;background:transparent;padding:8px 0 10px;font-size:11px;color:#8e8e93;cursor:pointer}
+  .tabbar button .ic{display:block;font-size:21px;line-height:1.15}
+  .tabbar button.sel{color:#007aff}
+  .page{display:none}.page.sel{display:block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="app">SAKUNET</h1>
+
+  <!-- 主页 -->
+  <div class="page sel" id="page-home">
+    <div class="card">
+      <div class="status-top">
+        <div class="status-dot" id="dot"></div>
+        <div class="status-main">
+          <div class="status-state" id="state">未连接</div>
+          <div class="status-exit" id="exit">当前出口：—</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="power"><span class="track"></span></label>
+      </div>
+      <div class="rates">
+        <span>↓ <b id="rate-down">0 KB/s</b></span>
+        <span>↑ <b id="rate-up">0 KB/s</b></span>
+        <span id="core-ver" style="color:#8e8e93"></span>
+      </div>
+      <div class="seg" id="mode-seg">
+        <button data-mode="rule">规则</button>
+        <button data-mode="global">全局代理</button>
+        <button data-mode="direct">全局直连</button>
+      </div>
+      <div class="err" id="err"></div>
+    </div>
+    <div class="sec-title">策略组</div>
+    <div id="groups"><div class="hint">内核启动后，这里按组列出节点，点组展开、点节点切换。</div></div>
+  </div>
+
+  <!-- 节点页 -->
+  <div class="page" id="page-nodes">
+    <div class="card" style="padding:8px 16px">
+      <div class="row" style="border:0"><span style="font-weight:600">全部节点</span><button class="btn" id="test-all">全部测速</button></div>
+    </div>
+    <div class="card" id="all-nodes" style="padding:6px 0"><div class="hint" style="padding:8px 16px">内核启动后显示全部节点。</div></div>
+  </div>
+
+  <!-- 设置页 -->
+  <div class="page" id="page-settings">
+    <div class="sec-title" style="margin-top:2px">配置</div>
+    <div class="card" style="padding:6px 0">
+      <div class="row"><span>节点文件 nodes.json</span><span class="val" id="set-nodes">—</span></div>
+      <div class="row"><span>内核 sing-box</span><span class="val" id="set-core">—</span></div>
+      <div class="row"><span>重载配置（重读 nodes.json）</span><button class="btn gray" id="btn-reload">重载</button></div>
+      <div class="row"><span>重启内核</span><button class="btn gray" id="btn-restart">重启</button></div>
+    </div>
+    <div class="sec-title">系统代理（Windows）</div>
+    <div class="card" style="padding:6px 0">
+      <div class="row"><span>系统代理 127.0.0.1:2080</span><span><button class="btn gray" id="btn-proxy-on">开启</button> <button class="btn gray" id="btn-proxy-off">关闭</button></span></div>
+    </div>
+    <div class="hint">SakuNet v0.1 · 内核为 sing-box 侧车进程 · 规则集来自 slynnnn/surge-rules，每日自动更新。</div>
+    <div class="err" id="err2"></div>
+  </div>
+</div>
+
+<nav class="tabbar">
+  <button data-page="home" class="sel"><span class="ic">🏠</span>主页</button>
+  <button data-page="nodes"><span class="ic">📋</span>节点</button>
+  <button data-page="settings"><span class="ic">⚙️</span>设置</button>
+</nav>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = { running:false, groups:[], nodes:{}, delays:{}, open:new Set(), lastTotals:null, lastTime:0 };
+async function j(url, opt){ const r = await fetch(url, opt); const t = await r.json(); if(!r.ok) throw new Error(t.error||("HTTP "+r.status)); return t; }
+function showErr(e){ const s = e ? String(e.message||e) : ""; $("err").textContent = s; $("err2").textContent = s; }
+
+const FLAGS = [["日本","🇯🇵"],["东京","🇯🇵"],["大阪","🇯🇵"],["JP","🇯🇵"],["香港","🇭🇰"],["HK","🇭🇰"],["美国","🇺🇸"],["US","🇺🇸"],["韩国","🇰🇷"],["KR","🇰🇷"],["台湾","🇹🇼"],["TW","🇹🇼"],["新加坡","🇸🇬"],["SG","🇸🇬"],["英国","🇬🇧"],["UK","🇬🇧"],["德国","🇩🇪"],["DE","🇩🇪"],["法国","🇫🇷"],["FR","🇫🇷"],["加拿大","🇨🇦"],["CA","🇨🇦"],["澳大利亚","🇦🇺"],["AU","🇦🇺"]];
+function flagOf(name){
+  const m = name.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u); if(m) return m[0];
+  for(const [k,f] of FLAGS){ if(name.toUpperCase().includes(k)) return f; }
+  return "🌐";
+}
+function capsule(ms){
+  if(ms === undefined) return '<span class="capsule gr">—</span>';
+  if(ms === null) return '<span class="capsule gr">超时</span>';
+  const cls = ms < 100 ? "g" : (ms < 200 ? "y" : "r");
+  return '<span class="capsule '+cls+'">'+ms+' ms</span>';
+}
+function ptag(name){
+  const n = state.nodes[name];
+  return n ? '<span class="ptag">'+n.type.toLowerCase()+'</span>' : '';
+}
+function nodeRow(name, selected){
+  return '<div class="node'+(selected?' sel':'')+'" data-node="'+name.replace(/"/g,'&quot;')+'">'
+    + '<span class="flag">'+flagOf(name)+'</span><span class="nname">'+name+'</span>'+ptag(name)
+    + '<span class="sp"></span>'+capsule(state.delays[name])
+    + '<span class="check">'+(selected?'✓':'')+'</span></div>';
+}
+const GICON = {"节点选择":"🌐","AI":"🤖","流媒体":"🎬","社交":"💬","漏网之鱼":"🐟"};
+
+function renderGroups(){
+  const box = $("groups"); box.innerHTML = "";
+  state.groups.forEach(gr => {
+    const card = document.createElement("div"); card.className = "card group" + (state.open.has(gr.name) ? " open" : "");
+    let rows = gr.all.map(m => nodeRow(m, m === gr.now)).join("");
+    card.innerHTML = '<div class="g-head"><span class="g-icon">'+(GICON[gr.name]||"📁")+'</span>'
+      + '<span class="g-name">'+gr.name+'</span>'
+      + '<span class="g-cur"><span class="g-cur-name">'+gr.now+'</span></span>'
+      + capsule(state.delays[gr.now])
+      + '<span class="g-tools"><button class="test-btn">测速</button><span class="chev">›</span></span></div>'
+      + '<div class="g-body">'+rows+'</div>';
+    card.querySelector(".g-head").onclick = e => {
+      if(e.target.classList.contains("test-btn")) return;
+      state.open.has(gr.name) ? state.open.delete(gr.name) : state.open.add(gr.name);
+      renderGroups();
+    };
+    card.querySelector(".test-btn").onclick = async () => { await testMembers(gr.all); };
+    card.querySelectorAll(".node").forEach(el => {
+      el.onclick = async () => {
+        try{ await j("/api/switch", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({group: gr.name, name: el.dataset.node})}); await loadGroups(); }
+        catch(e){ showErr(e); }
+      };
+    });
+    box.appendChild(card);
+  });
+  const main = state.groups.find(g => g.name === "节点选择");
+  $("exit").textContent = "当前出口：" + (main ? (main.name + " → " + main.now) : "—");
+}
+function renderAllNodes(){
+  const box = $("all-nodes");
+  const names = Object.keys(state.nodes).sort();
+  if(!names.length){ box.innerHTML = '<div class="hint" style="padding:8px 16px">内核启动后显示全部节点。</div>'; return; }
+  box.innerHTML = names.map(n => nodeRow(n, false)).join("");
+  box.querySelectorAll(".node").forEach(el => { el.onclick = () => testMembers([el.dataset.node]); });
+}
+async function testMembers(list){
+  for(const name of list){
+    if(name === "direct") continue;
+    try{ const r = await j("/api/delay?name=" + encodeURIComponent(name)); state.delays[name] = r.delay; }
+    catch(e){ state.delays[name] = null; }
+    renderGroups(); renderAllNodes();
+  }
+}
+async function loadGroups(){
+  const [g, n] = await Promise.all([j("/api/groups"), j("/api/nodes").catch(() => [])]);
+  state.groups = g;
+  state.nodes = {}; n.forEach(x => state.nodes[x.name] = x);
+  renderGroups(); renderAllNodes();
+}
+async function loadMode(){
+  try{
+    const m = await j("/api/mode");
+    document.querySelectorAll("#mode-seg button").forEach(b => b.classList.toggle("sel", b.dataset.mode === m.mode));
+  }catch(e){ /* 内核未启动时忽略 */ }
+}
+async function refreshStatus(){
+  try{
+    const s = await j("/api/status");
+    state.running = !!s.running;
+    $("power").checked = state.running;
+    $("dot").className = "status-dot" + (state.running ? " on" : "");
+    $("state").textContent = state.running ? "已连接" : "未连接";
+    $("core-ver").textContent = s.version || "";
+    $("set-nodes").textContent = s.nodes_file || "—";
+    $("set-core").textContent = s.binary || "未找到 sing-box（见 fetch-core.ps1）";
+    if(s.error) showErr(s.error); else if(state.running) showErr("");
+    if(state.running){ await loadGroups(); await loadMode(); } 
+  }catch(e){ showErr(e); }
+}
+async function pollTraffic(){
+  if(!state.running){ $("rate-down").textContent = "0 KB/s"; $("rate-up").textContent = "0 KB/s"; return; }
+  try{
+    const t = await j("/api/connections");
+    const now = Date.now();
+    if(state.lastTotals && now > state.lastTime){
+      const dt = (now - state.lastTime) / 1000;
+      const fmt = v => v >= 1048576 ? (v/1048576).toFixed(1)+" MB/s" : v >= 1024 ? (v/1024).toFixed(1)+" KB/s" : Math.round(v)+" B/s";
+      $("rate-down").textContent = fmt(Math.max(0, (t.downloadTotal - state.lastTotals.d) / dt));
+      $("rate-up").textContent = fmt(Math.max(0, (t.uploadTotal - state.lastTotals.u) / dt));
+    }
+    state.lastTotals = {d: t.downloadTotal || 0, u: t.uploadTotal || 0}; state.lastTime = now;
+  }catch(e){ /* 忽略 */ }
+}
+$("power").onchange = async () => {
+  try{ await j($("power").checked ? "/api/start" : "/api/stop", {method:"POST"}); }catch(e){ showErr(e); }
+  refreshStatus();
+};
+document.querySelectorAll("#mode-seg button").forEach(b => {
+  b.onclick = async () => {
+    try{ await j("/api/mode", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({mode: b.dataset.mode})}); loadMode(); }
+    catch(e){ showErr(e); }
+  };
+});
+document.querySelectorAll(".tabbar button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll(".tabbar button").forEach(x => x.classList.toggle("sel", x === b));
+    document.querySelectorAll(".page").forEach(p => p.classList.toggle("sel", p.id === "page-" + b.dataset.page));
+  };
+});
+$("test-all").onclick = () => testMembers(Object.keys(state.nodes));
+$("btn-reload").onclick = async () => { try{ await j("/api/restart", {method:"POST"}); }catch(e){ showErr(e); } refreshStatus(); };
+$("btn-restart").onclick = async () => { try{ await j("/api/restart", {method:"POST"}); }catch(e){ showErr(e); } refreshStatus(); };
+$("btn-proxy-on").onclick = async () => { try{ await j("/api/sysproxy", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({on:true})}); }catch(e){ showErr(e); } };
+$("btn-proxy-off").onclick = async () => { try{ await j("/api/sysproxy", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({on:false})}); }catch(e){ showErr(e); } };
+refreshStatus(); setInterval(refreshStatus, 8000); setInterval(pollTraffic, 2000);
+</script>
+</body>
+</html>

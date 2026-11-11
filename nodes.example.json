@@ -1,0 +1,79 @@
+{
+  "tun": false,
+  "nodes": [
+    {
+      "name": "示例-大阪-Snell",
+      "type": "snell",
+      "server": "192.0.2.11",
+      "port": 17886,
+      "psk": "example-psk-please-change-1234",
+      "version": 6,
+      "mode": "default",
+      "tfo": true
+    },
+    {
+      "name": "示例-香港-AnyTLS",
+      "type": "anytls",
+      "server": "192.0.2.12",
+      "port": 10080,
+      "password": "example-password",
+      "sni": "example.com",
+      "insecure": true
+    },
+    {
+      "name": "示例-东京-Hysteria2",
+      "type": "hysteria2",
+      "server": "192.0.2.13",
+      "port": 443,
+      "password": "example-password",
+      "sni": "example.com",
+      "insecure": false
+    },
+    {
+      "name": "示例-美国-Naive",
+      "type": "naive",
+      "server": "192.0.2.14",
+      "port": 443,
+      "username": "example-user",
+      "password": "example-password",
+      "sni": "example.com"
+    },
+    {
+      "name": "示例-VLESS-Reality",
+      "type": "vless",
+      "server": "192.0.2.15",
+      "port": 443,
+      "uuid": "00000000-0000-0000-0000-000000000000",
+      "flow": "xtls-rprx-vision",
+      "sni": "example.com",
+      "reality_public_key": "M0fieUO479vVYvOvyYZZf5IbLyIka2vsRfKkXA4MAho",
+      "reality_short_id": "0123456789abcdef"
+    },
+    {
+      "name": "示例-VMess",
+      "type": "vmess",
+      "server": "192.0.2.16",
+      "port": 443,
+      "uuid": "00000000-0000-0000-0000-000000000000",
+      "alter_id": 0,
+      "security": "auto",
+      "sni": "example.com"
+    },
+    {
+      "name": "示例-Trojan",
+      "type": "trojan",
+      "server": "192.0.2.17",
+      "port": 443,
+      "password": "example-password",
+      "sni": "example.com"
+    },
+    {
+      "name": "示例-Shadowsocks",
+      "type": "shadowsocks",
+      "server": "192.0.2.18",
+      "port": 8388,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "gKNs401BGpswwlKp539csQ=="
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+# binaries & core (fetched separately, never committed)
+*.exe
+*.dll
+sing-box*
+# local user data — contains credentials, never committed
+nodes.json
+sakunet-mode.json
+sing-box-config.json
+cache.db
+sakunet-core.log
