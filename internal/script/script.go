@@ -112,6 +112,13 @@ func FromEngine(e *surge.EngineData) []*Def {
 	for _, sd := range e.Scripts {
 		defs = append(defs, defFromSurge(sd))
 	}
+	for _, pd := range e.Panels {
+		for _, d := range defs {
+			if d.Name == pd.ScriptName {
+				d.PanelRef = true
+			}
+		}
+	}
 	return defs
 }
 
@@ -176,11 +183,13 @@ func Hash(code string) string {
 
 // Describe summarises a def list for import-report notes.
 func Describe(defs []*Def) string {
-	var live, cron, unsup, failed int
+	var live, cron, panel, unsup, failed int
 	for _, d := range defs {
 		switch {
 		case d.IsCron():
 			cron++
+		case d.PanelRef && d.LoadErr == "":
+			panel++
 		case d.Supported && d.LoadErr == "":
 			live++
 		case d.LoadErr != "":
@@ -189,5 +198,5 @@ func Describe(defs []*Def) string {
 			unsup++
 		}
 	}
-	return fmt.Sprintf("脚本引擎：%d 个 http 脚本已上线，%d 个 cron 脚本已排程，%d 个类型暂不支持，%d 个加载失败", live, cron, unsup, failed)
+	return fmt.Sprintf("脚本引擎：%d 个 http 脚本已上线，%d 个 cron 脚本已排程，%d 个面板脚本就绪，%d 个类型暂不支持，%d 个加载失败", live, cron, panel, unsup, failed)
 }

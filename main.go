@@ -33,7 +33,7 @@ import (
 )
 
 // Version is the SakuNet release version.
-const Version = "v1.0"
+const Version = "v1.2"
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
