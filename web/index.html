@@ -278,12 +278,15 @@ function renderAllNodes(){
   box.querySelectorAll(".node").forEach(el => { el.onclick = () => testMembers([el.dataset.node]); });
 }
 async function testMembers(list){
-  for(const name of list){
-    if(name === "direct") continue;
-    try{ const r = await j("/api/delay?name=" + encodeURIComponent(name)); state.delays[name] = r.delay; }
-    catch(e){ state.delays[name] = null; }
-    renderGroups(); renderAllNodes();
+  const names = list.filter(n => n !== "direct");
+  if(!names.length) return;
+  try{
+    const r = await j("/api/delay-batch", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({names: names})});
+    for(const n of names){ state.delays[n] = (r[n] === undefined || r[n] < 0) ? null : r[n]; }
+  }catch(e){
+    for(const n of names){ state.delays[n] = null; }
   }
+  renderGroups(); renderAllNodes();
 }
 async function loadGroups(){
   const [g, n] = await Promise.all([j("/api/groups"), j("/api/nodes").catch(() => [])]);

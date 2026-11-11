@@ -193,6 +193,44 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]int{"delay": d})
 	})
+	mux.HandleFunc("/api/delay-batch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			errJSON(w, fmt.Errorf("POST required"))
+			return
+		}
+		var body struct {
+			Names []string `json:"names"`
+			Group string   `json:"group"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+			errJSON(w, err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		names := body.Names
+		if body.Group != "" {
+			proxies, err := clash.Proxies(ctx)
+			if err != nil {
+				errJSON(w, err)
+				return
+			}
+			g, ok := proxies[body.Group]
+			if !ok {
+				errJSON(w, fmt.Errorf("策略组 %s 不存在", body.Group))
+				return
+			}
+			names = g.All
+		}
+		filtered := names[:0]
+		for _, n := range names {
+			if n != "direct" {
+				filtered = append(filtered, n)
+			}
+		}
+		res := clash.BatchDelay(ctx, filtered, "http://cp.cloudflare.com/generate_204", 10000)
+		writeJSON(w, 200, res)
+	})
 	mux.HandleFunc("/api/nodes", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()

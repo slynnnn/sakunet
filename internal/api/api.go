@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 )
 
@@ -109,6 +110,36 @@ func (c *Client) Delay(ctx context.Context, name, testURL string, timeoutMS int)
 		return 0, err
 	}
 	return r.Delay, nil
+}
+
+// BatchDelay measures many outbounds concurrently (bounded
+// parallelism) and returns name -> delay ms, with -1 for failures
+// (timeout / unreachable). It is the server-side engine behind the
+// panel's one-tap group speed test: one HTTP call from the page,
+// a fan-out here, instead of the page polling /api/delay serially.
+func (c *Client) BatchDelay(ctx context.Context, names []string, testURL string, timeoutMS int) map[string]int {
+	out := make(map[string]int, len(names))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 12)
+	for _, name := range names {
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			d, err := c.Delay(ctx, name, testURL, timeoutMS)
+			mu.Lock()
+			if err != nil {
+				out[name] = -1
+			} else {
+				out[name] = d
+			}
+			mu.Unlock()
+		}(name)
+	}
+	wg.Wait()
+	return out
 }
 
 // Connections returns cumulative traffic totals from /connections.
