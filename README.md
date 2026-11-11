@@ -24,7 +24,7 @@
 
 设置页：Surge 配置导入、分享链接/订阅导入、模块导入、MITM 引擎与 CA 状态、一键自检与诊断包导出都在这里。
 
-## 能力矩阵（v1.0 最终版）
+## 能力矩阵（v1.1，含 JS 脚本引擎）
 
 | 能力 | 状态 | 说明 |
 |---|---|---|
@@ -35,8 +35,8 @@
 | 外部 RULE-SET、USER-AGENT、GEOIP、URL-REGEX、逻辑复合规则 | ❌ 不支持 | 平台无对应物，逐条列入「未迁移清单」，不静默丢弃 |
 | MITM 引擎 | ✅ 已实现 | 仅 [MITM] hostname 命中才解密；CA 用导入配置里已有的 p12（本机内存解码）；面板可下载 CA 证书并给出 Windows 安装指引 |
 | URL Rewrite 引擎 | ✅ 已实现 | 302/307 重定向、reject 类（reject/reject-200/-img/-dict/-array）、header 类（请求头/响应头的 set/add/del，语法见引擎说明）；其余类型逐条标「不支持」并在设置页列出 |
-| 模块 .sgmodule | ✅ 已实现（部分） | 内嵌 MITM hostname 与重写规则并入引擎生效；脚本部分**不执行**（见下行），含脚本的模块导入时明确标注 |
-| Surge/QX 的 JS 脚本引擎 | ❌ 不含 | 不实现 JavaScriptCore 式脚本运行时；用户在用的真实配置无 [Script] 条目，[Script] 定义仅保存 |
+| 模块 .sgmodule | ✅ 已实现（部分） | 内嵌 MITM hostname、重写规则与脚本定义并入引擎生效（脚本见下行）；[Rule]/[Proxy] 段不并入，逐项标注 |
+| Surge/QX 的 JS 脚本引擎 | ✅ 已实现（子集） | goja 运行时；`http-request` / `http-response` 脚本在 MITM 解密流量上执行（去广告主力场景）；API 子集见下文「脚本引擎子集边界」；cron/event 等其他类型保留并标注「暂不支持」 |
 | 分享链接导入 | ✅ 已实现 | snell://、anytls://、hysteria2://（hy2://）、ss://（含 SIP002/老式）、trojan://、vmess://、vless:// 单链接与订阅 URL（整包 base64 自动识别） |
 | TUN 模式 | ✅ 已实现 | 设置页开关；Windows 需管理员，设置页有一键 UAC 提权重启 |
 | 系统托盘 | ✅ 已实现（Windows） | 开关内核、模式三段、打开面板、退出 |
@@ -45,7 +45,16 @@
 | 一键自检 | ✅ 已实现 | 内核、面板通信、DNS、经当前出口真实请求、规则集状态、MITM/CA、系统代理指向，逐项真跑、人话结论＋处置提示 |
 | 导出诊断包 | ✅ 已实现 | 版本、状态、配置结构摘要、自检结果、最近日志；**导出前自动脱敏**（脱敏清单与单测在 internal/diag） |
 
-**最终版明确不含**：JS 脚本引擎（理由如上）、TUIC 等未建模协议的导入（内核支持、导入器未建模）、QX 的规则/脚本生态商店类功能。
+**明确不含**：TUIC 等未建模协议的导入（内核支持、导入器未建模）、QX 的规则/脚本生态商店类功能。
+
+### 脚本引擎子集边界（v1.1）
+
+- **来源**：Surge 配置 [Script] 段与 .sgmodule 的 [Script] 段。`script-path` 为远程 URL 的在**导入时**下载并缓存进 `imported.json`，同时记录 SHA-256 指纹；本地路径直接读，读不到逐条在导入报告里说明（面板导入只收到配置文件本身，相对本地路径通常不可达）。引擎运行时不联网取脚本。
+- **执行位置**：与 Surge 语义一致，脚本依附 MITM——只在 MITM 名单内（被解密）的请求/响应上运行；透传流量不跑脚本。gzip/deflate 响应正文会先解码再交给脚本，脚本改写后以未编码正文发出。
+- **支持的 API**：`$request`、`$response`、`$done`（无参＝放行，含对 `$request`/`$response` 的原地修改；对象参数按字段改写 url/headers/body/status；请求脚本可用 `$done({response:{status,headers,body}})` 直接应答＝拒绝/模拟）、`$persistentStore`（落本机 `script-store.json`，0600）、`$notification.post`（转面板通知与引擎日志）、`console.log`（进引擎日志）、`$httpClient.get/post`（回调式，同步执行、只许 http/https、超时受脚本预算约束）。
+- **QX 薄映射**：`$task.fetch`（Promise 式，映射到同一传输层）、`$prefs.valueForKey/setValueForKey/removeValueForKey`（映射到同一存储）、`$notify`（映射到通知）。
+- **硬超时**：每脚本单次执行有硬超时（定义里的 `timeout` 秒数，无则默认 10 秒），到时强制中断（goja Interrupt），死循环脚本不会拖住代理；脚本报错/超时一律放行原文并记入引擎日志（设置页可查最近执行结果与日志）。
+- **不支持**：`cron` / `event` / `generic` 等非 http 类型脚本（保留、标注、不执行）；`$httpAPI`（调用即抛可读错误并记日志）；`setTimeout` 等异步定时器与依赖事件循环的写法；脚本正文超过 4 MiB 的响应不进脚本（原样透传）。
 
 ## 配置来源
 
@@ -85,6 +94,7 @@ SakuNet.exe（Go 外壳）：面板 127.0.0.1:18090（仅本机）、
 ## 验收
 
 - 单元与实测（本机 Linux 构建全跑）：配置生成与 Snell 映射、Surge 导入（含畸形输入对抗集：截断/乱码/重复段/循环引用组不崩溃）、链接解析 7 协议、MITM 引擎真 curl 端到端（302 命中、header 改写在源站可见、非名单主机透传且证书验证走源站 CA）、诊断包脱敏断言（假凭据零出现）。
+- JS 脚本引擎（v1.1）实测：单测覆盖响应 JSON 去广告字段、请求头删改、`$done` 直答拒绝、`$persistentStore` 往返、死循环脚本超时强杀后引擎存活、语法/运行错误只报错不崩；真 curl 端到端（自签 HTTPS 源站＋MITM）验证响应脚本改写正文、请求脚本注入头在源站可见、脚本 403 直答、gzip 正文解码后改写。
 - sing-box check：导入配置（普通＋TUN 变体）与兜底配置均经 sing-box 1.14.4 `check` 通过。
 - 监听面实查：起服后 `ss` 核对四个端口全部 127.0.0.1。
 - **真 Windows 自动实测（CI）**：GitHub Actions 的 windows-latest 作业在每次发布时真跑——解压产物、启动 SakuNet.exe、导入演示配置、断言状态/分组接口与内核进程、抓面板截图存档。作业不过，版本不发。（见仓库 workflow 的 windows-smoke 作业。）

@@ -352,6 +352,10 @@ func main() {
 		w.Header().Set("Content-Disposition", "attachment; filename=sakunet-diagnostics.zip")
 		_, _ = w.Write(bundle)
 	})
+	mux.HandleFunc("/api/scripts/logs", func(w http.ResponseWriter, r *http.Request) {
+		logs, notes := mgr.ScriptLogs()
+		writeJSON(w, 200, map[string]any{"logs": logs, "notifications": notes})
+	})
 	mux.HandleFunc("/api/mitm/ca.cer", func(w http.ResponseWriter, r *http.Request) {
 		der, err := mgr.EngineCA()
 		if err != nil {

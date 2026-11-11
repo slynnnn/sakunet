@@ -12,6 +12,7 @@ import (
 
 	"sakunet/internal/config"
 	"sakunet/internal/mitm"
+	"sakunet/internal/script"
 	"sakunet/internal/surge"
 )
 
@@ -32,21 +33,22 @@ type Status struct {
 }
 
 type Manager struct {
-	mu         sync.Mutex
-	cmd        *exec.Cmd
-	done       chan struct{}
-	appDir     string
-	nodesPath  string
-	binary     string
-	version    string
-	lastErr    string
-	mode       string
-	sourceKind string // "nodes" (hand-written nodes.json) or "surge" (imported)
-	sourceName string
-	sourceAt   time.Time
-	tun        bool
-	mitmSrv    *mitm.Server
-	mitmInfo   *MITMInfo
+	mu           sync.Mutex
+	cmd          *exec.Cmd
+	done         chan struct{}
+	appDir       string
+	nodesPath    string
+	binary       string
+	version      string
+	lastErr      string
+	mode         string
+	sourceKind   string // "nodes" (hand-written nodes.json) or "surge" (imported)
+	sourceName   string
+	sourceAt     time.Time
+	tun          bool
+	mitmSrv      *mitm.Server
+	mitmInfo     *MITMInfo
+	scriptRunner *script.Runner
 }
 
 // sourceMeta is sakunet-source.json: which configuration source is
@@ -141,6 +143,13 @@ func (m *Manager) ImportSurge(origName string, data []byte) (*surge.Report, erro
 	}
 	if imp.Report.NodesOK == 0 && imp.Report.GroupsOK == 0 {
 		return nil, fmt.Errorf("未从 %s 解析出任何节点或策略组，请确认文件是 Surge 配置", origName)
+	}
+	// Resolve script bodies (download remote script-paths, cache +
+	// fingerprint them) so the JS engine can run offline afterwards.
+	imp.Report.Notes = append(imp.Report.Notes, imp.ResolveScripts()...)
+	if len(imp.Engine.Scripts) > 0 {
+		imp.Report.Notes = append(imp.Report.Notes,
+			script.Describe(script.FromEngine(&imp.Engine)))
 	}
 	if err := surge.SaveImported(imp, m.importedPath()); err != nil {
 		return nil, err
@@ -312,10 +321,25 @@ func (m *Manager) Restart() error {
 	return m.Start()
 }
 
+// ScriptLogs returns the JS engine's recent log entries and
+// notifications for the settings page. Empty when no runner is up.
+func (m *Manager) ScriptLogs() (logs []script.LogEntry, notes []script.Notification) {
+	m.mu.Lock()
+	r := m.scriptRunner
+	m.mu.Unlock()
+	if r == nil {
+		return []script.LogEntry{}, []script.Notification{}
+	}
+	return r.Logs(), r.Notifications()
+}
+
 // Status reports the sidecar state.
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.scriptRunner != nil && m.mitmInfo != nil {
+		m.mitmInfo.Scripts = m.scriptRunner.Infos()
+	}
 	st := Status{Mode: m.mode, Binary: m.binary, NodesFile: m.nodesPath, Version: m.version, Error: m.lastErr,
 		SourceKind: m.sourceKind, SourceName: m.sourceName, Tun: m.tun, MITM: m.mitmInfo}
 	st.Configured = m.sourceKind == "surge"

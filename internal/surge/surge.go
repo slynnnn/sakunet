@@ -30,8 +30,10 @@ type Unmigrated struct {
 // PendingSection is one engine-backed section ([MITM],
 // [URL Rewrite], [Script]) that was fully parsed and preserved on
 // import. Since v1.0 the MITM/rewrite engine executes the first
-// two; [Script] entries are preserved but never executed. It is
-// NOT an unmigrated item: nothing is lost.
+// two; since v1.1 the JS engine executes http-request /
+// http-response scripts too (other script types stay preserved
+// and are reported as unsupported). It is NOT an unmigrated item:
+// nothing is lost.
 type PendingSection struct {
 	Section string `json:"section"` // MITM | URL Rewrite | Script
 	Count   int    `json:"count"`
@@ -86,6 +88,24 @@ type RewriteRule struct {
 type ScriptDef struct {
 	Name   string            `json:"name"`
 	Params map[string]string `json:"params"`
+	// Resolved is filled in at panel import time (see resolve.go):
+	// the script body is fetched/read and fingerprinted so the JS
+	// engine can run it without touching the network per request.
+	// It stays nil for offline/report-only parses.
+	Resolved *ResolvedScript `json:"resolved,omitempty"`
+}
+
+// ResolvedScript is a script definition after source resolution.
+type ResolvedScript struct {
+	Type         string `json:"type"`
+	Pattern      string `json:"pattern,omitempty"`
+	Source       string `json:"source"` // 配置来源描述：Surge 配置 / 模块名 / script-path 原文
+	Code         string `json:"code,omitempty"`
+	SHA256       string `json:"sha256,omitempty"`
+	TimeoutSec   int    `json:"timeout_sec,omitempty"`
+	RequiresBody bool   `json:"requires_body,omitempty"`
+	Enabled      bool   `json:"enabled"`
+	LoadError    string `json:"load_error,omitempty"`
 }
 
 // Imported is the persisted result of a Surge import (imported.json).
