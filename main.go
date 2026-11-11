@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"sakunet/internal/api"
 	"sakunet/internal/config"
 	"sakunet/internal/core"
+	"sakunet/internal/surge"
 	"sakunet/internal/sysproxy"
 	"sakunet/web"
 )
@@ -46,6 +48,43 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("wrote", os.Args[3])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "surge2json" {
+		// Offline Surge -> sing-box converter. With only an input
+		// file it prints the migration report and writes nothing
+		// (handy for a private config you only want counted).
+		if len(os.Args) != 3 && len(os.Args) != 4 {
+			fmt.Fprintln(os.Stderr, "usage: sakunet surge2json <surge.conf> [out.json]")
+			os.Exit(2)
+		}
+		data, err := os.ReadFile(os.Args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "surge2json:", err)
+			os.Exit(1)
+		}
+		imp, err := surge.Parse(os.Args[2], data)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "surge2json:", err)
+			os.Exit(1)
+		}
+		// Always build in memory (validates every converted outbound
+		// and rule); only write the config when an output was given.
+		cfg, err := surge.BuildImported(imp, "rule")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "surge2json: build:", err)
+			os.Exit(1)
+		}
+		if len(os.Args) == 4 {
+			raw, _ := json.MarshalIndent(cfg, "", "  ")
+			if err := os.WriteFile(os.Args[3], append(raw, '\n'), 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, "surge2json:", err)
+				os.Exit(1)
+			}
+			fmt.Println("wrote", os.Args[3])
+		}
+		raw, _ := json.MarshalIndent(imp.Report, "", "  ")
+		fmt.Println(string(raw))
 		return
 	}
 
@@ -108,7 +147,7 @@ func main() {
 		}
 		groups := []group{}
 		for name, p := range proxies {
-			if p.Type == "Selector" {
+			if p.Type == "Selector" || p.Type == "URLTest" {
 				groups = append(groups, group{Name: name, Now: p.Now, All: p.All})
 			}
 		}
@@ -194,6 +233,42 @@ func main() {
 			}
 		}
 		writeJSON(w, 200, map[string]string{"mode": mgr.Mode()})
+	})
+	mux.HandleFunc("/api/import", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			errJSON(w, fmt.Errorf("POST required"))
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			errJSON(w, fmt.Errorf("缺少上传文件：%w", err))
+			return
+		}
+		defer file.Close()
+		data, err := io.ReadAll(io.LimitReader(file, 16<<20))
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		rep, err := mgr.ImportSurge(header.Filename, data)
+		if rep != nil {
+			writeJSON(w, 200, rep)
+			return
+		}
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]string{"ok": "1"})
+	})
+	mux.HandleFunc("/api/source", func(w http.ResponseWriter, r *http.Request) {
+		st := mgr.Status()
+		writeJSON(w, 200, map[string]any{
+			"kind":   st.SourceKind,
+			"name":   st.SourceName,
+			"at":     st.SourceAt,
+			"report": mgr.ImportReport(),
+		})
 	})
 	mux.HandleFunc("/api/sysproxy", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

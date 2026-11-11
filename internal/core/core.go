@@ -8,30 +8,47 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"sakunet/internal/config"
+	"sakunet/internal/surge"
 )
 
 type Status struct {
-	Mode      string `json:"mode"`
-	Running   bool   `json:"running"`
-	PID       int    `json:"pid,omitempty"`
-	Binary    string `json:"binary,omitempty"`
-	NodesFile string `json:"nodes_file,omitempty"`
-	Version   string `json:"version,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Mode       string `json:"mode"`
+	Running    bool   `json:"running"`
+	PID        int    `json:"pid,omitempty"`
+	Binary     string `json:"binary,omitempty"`
+	NodesFile  string `json:"nodes_file,omitempty"`
+	Version    string `json:"version,omitempty"`
+	Error      string `json:"error,omitempty"`
+	SourceKind string `json:"source_kind"` // nodes | surge
+	SourceName string `json:"source_name,omitempty"`
+	SourceAt   string `json:"source_at,omitempty"`
+	Configured bool   `json:"configured"` // an imported config or a nodes.json exists
 }
 
 type Manager struct {
-	mu        sync.Mutex
-	cmd       *exec.Cmd
-	done      chan struct{}
-	appDir    string
-	nodesPath string
-	binary    string
-	version   string
-	lastErr   string
-	mode      string
+	mu         sync.Mutex
+	cmd        *exec.Cmd
+	done       chan struct{}
+	appDir     string
+	nodesPath  string
+	binary     string
+	version    string
+	lastErr    string
+	mode       string
+	sourceKind string // "nodes" (hand-written nodes.json) or "surge" (imported)
+	sourceName string
+	sourceAt   time.Time
+}
+
+// sourceMeta is sakunet-source.json: which configuration source is
+// active. Absent file = hand-written nodes.json.
+type sourceMeta struct {
+	Kind       string    `json:"kind"`
+	SourceName string    `json:"source_name,omitempty"`
+	At         time.Time `json:"at,omitempty"`
 }
 
 // New resolves the app directory (executable dir, falling back to cwd)
@@ -56,7 +73,7 @@ func New(nodesPath string) (*Manager, error) {
 	} else if abs, err := filepath.Abs(nodesPath); err == nil {
 		nodesPath = abs
 	}
-	m := &Manager{appDir: dir, nodesPath: nodesPath, mode: "rule"}
+	m := &Manager{appDir: dir, nodesPath: nodesPath, mode: "rule", sourceKind: "nodes"}
 	if raw, err := os.ReadFile(m.modePath()); err == nil {
 		var v struct {
 			Mode string `json:"mode"`
@@ -65,10 +82,78 @@ func New(nodesPath string) (*Manager, error) {
 			m.mode = v.Mode
 		}
 	}
+	if raw, err := os.ReadFile(m.sourceMetaPath()); err == nil {
+		var meta sourceMeta
+		if json.Unmarshal(raw, &meta) == nil && meta.Kind == "surge" {
+			if _, err := os.Stat(m.importedPath()); err == nil {
+				m.sourceKind = "surge"
+				m.sourceName = meta.SourceName
+				m.sourceAt = meta.At
+			}
+		}
+	}
 	return m, nil
 }
 
-func (m *Manager) modePath() string { return filepath.Join(m.appDir, "sakunet-mode.json") }
+func (m *Manager) modePath() string       { return filepath.Join(m.appDir, "sakunet-mode.json") }
+func (m *Manager) sourceMetaPath() string { return filepath.Join(m.appDir, "sakunet-source.json") }
+func (m *Manager) importedPath() string   { return filepath.Join(m.appDir, "imported.json") }
+
+// generate renders the sing-box config from the active source.
+func (m *Manager) generate() error {
+	if m.sourceKind == "surge" {
+		return surge.GenerateImported(m.importedPath(), m.configPath(), m.mode)
+	}
+	return config.Generate(m.nodesPath, m.configPath(), m.mode)
+}
+
+// ImportSurge parses an uploaded Surge .conf, persists it as the
+// active configuration source (imported.json) and restarts the core
+// if it is running. The hand-written nodes.json is left untouched;
+// switching back is a matter of removing the source meta (settings
+// page shows which source is active).
+func (m *Manager) ImportSurge(origName string, data []byte) (*surge.Report, error) {
+	imp, err := surge.Parse(origName, data)
+	if err != nil {
+		return nil, err
+	}
+	if imp.Report.NodesOK == 0 && imp.Report.GroupsOK == 0 {
+		return nil, fmt.Errorf("未从 %s 解析出任何节点或策略组，请确认文件是 Surge 配置", origName)
+	}
+	if err := surge.SaveImported(imp, m.importedPath()); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	m.sourceKind = "surge"
+	m.sourceName = origName
+	m.sourceAt = imp.ImportedAt
+	running := m.cmd != nil
+	m.mu.Unlock()
+	meta := sourceMeta{Kind: "surge", SourceName: origName, At: imp.ImportedAt}
+	if raw, err := json.Marshal(meta); err == nil {
+		_ = os.WriteFile(m.sourceMetaPath(), raw, 0o644)
+	}
+	rep := imp.Report
+	if running {
+		if err := m.Restart(); err != nil {
+			return &rep, fmt.Errorf("导入已保存，但内核重启失败：%w", err)
+		}
+	}
+	return &rep, nil
+}
+
+// ImportReport returns the persisted report of the active Surge
+// import, if any.
+func (m *Manager) ImportReport() *surge.Report {
+	if m.sourceKind != "surge" {
+		return nil
+	}
+	imp, err := surge.LoadImported(m.importedPath())
+	if err != nil {
+		return nil
+	}
+	return &imp.Report
+}
 
 // Mode returns the current routing mode (rule|global|direct).
 func (m *Manager) Mode() string {
@@ -135,7 +220,7 @@ func (m *Manager) Start() error {
 		return err
 	}
 	m.binary = bin
-	if err := config.Generate(m.nodesPath, m.configPath(), m.mode); err != nil {
+	if err := m.generate(); err != nil {
 		m.lastErr = err.Error()
 		return fmt.Errorf("generate config: %w", err)
 	}
@@ -207,7 +292,17 @@ func (m *Manager) Restart() error {
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	st := Status{Mode: m.mode, Binary: m.binary, NodesFile: m.nodesPath, Version: m.version, Error: m.lastErr}
+	st := Status{Mode: m.mode, Binary: m.binary, NodesFile: m.nodesPath, Version: m.version, Error: m.lastErr,
+		SourceKind: m.sourceKind, SourceName: m.sourceName}
+	st.Configured = m.sourceKind == "surge"
+	if !st.Configured {
+		if _, err := os.Stat(m.nodesPath); err == nil {
+			st.Configured = true
+		}
+	}
+	if !m.sourceAt.IsZero() {
+		st.SourceAt = m.sourceAt.Format("2006-01-02 15:04")
+	}
 	if m.cmd != nil && m.cmd.Process != nil {
 		select {
 		case <-m.done:

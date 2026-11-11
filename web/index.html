@@ -107,7 +107,7 @@
       <div class="err" id="err"></div>
     </div>
     <div class="sec-title">策略组</div>
-    <div id="groups"><div class="hint">内核启动后，这里按组列出节点，点组展开、点节点切换。</div></div>
+    <div id="groups"><div class="hint">还没有配置：先到「设置」页导入你的 Surge 配置，节点、策略组与分流会自动生成。</div></div>
   </div>
 
   <!-- 节点页 -->
@@ -120,18 +120,26 @@
 
   <!-- 设置页 -->
   <div class="page" id="page-settings">
-    <div class="sec-title" style="margin-top:2px">配置</div>
+    <div class="sec-title" style="margin-top:2px">导入 Surge 配置（第一步）</div>
     <div class="card" style="padding:6px 0">
-      <div class="row"><span>节点文件 nodes.json</span><span class="val" id="set-nodes">—</span></div>
+      <div class="row"><span>选择 Surge .conf 文件</span><span><input type="file" id="imp-file" accept=".conf,.txt" style="max-width:190px;font-size:12.5px"></span></div>
+      <div class="row"><span>节点、策略组与分流规则全部由它派生</span><button class="btn" id="btn-import">导入</button></div>
+      <div class="hint" style="padding:6px 16px">导入在本机完成，不上传任何内容；导入后该文件即为生效配置，路由完全按它的规则生成。</div>
+      <div id="imp-result" style="padding:2px 16px 10px"></div>
+    </div>
+    <div class="sec-title">配置</div>
+    <div class="card" style="padding:6px 0">
+      <div class="row"><span>当前生效来源</span><span class="val" id="set-source">—</span></div>
+      <div class="row"><span>节点文件 nodes.json（备用）</span><span class="val" id="set-nodes">—</span></div>
       <div class="row"><span>内核 sing-box</span><span class="val" id="set-core">—</span></div>
-      <div class="row"><span>重载配置（重读 nodes.json）</span><button class="btn gray" id="btn-reload">重载</button></div>
+      <div class="row"><span>重载配置</span><button class="btn gray" id="btn-reload">重载</button></div>
       <div class="row"><span>重启内核</span><button class="btn gray" id="btn-restart">重启</button></div>
     </div>
     <div class="sec-title">系统代理（Windows）</div>
     <div class="card" style="padding:6px 0">
       <div class="row"><span>系统代理 127.0.0.1:2080</span><span><button class="btn gray" id="btn-proxy-on">开启</button> <button class="btn gray" id="btn-proxy-off">关闭</button></span></div>
     </div>
-    <div class="hint">SakuNet v0.2 · 内核为 sing-box 侧车进程 · 规则集来自 slynnnn/surge-rules，每日自动更新。</div>
+    <div class="hint">SakuNet v0.3 · 内核为 sing-box 侧车进程 · 规则集来自 slynnnn/surge-rules，每日自动更新。</div>
     <div class="err" id="err2"></div>
   </div>
 </div>
@@ -197,7 +205,7 @@ function renderGroups(){
     });
     box.appendChild(card);
   });
-  const main = state.groups.find(g => g.name === "节点选择");
+  const main = state.groups.find(g => g.name === "节点选择") || state.groups[0];
   $("exit").textContent = "当前出口：" + (main ? (main.name + " → " + main.now) : "—");
 }
 function renderAllNodes(){
@@ -236,6 +244,9 @@ async function refreshStatus(){
     $("state").textContent = state.running ? "已连接" : "未连接";
     $("core-ver").textContent = s.version || "";
     $("set-nodes").textContent = s.nodes_file || "—";
+    $("set-source").textContent = s.source_kind === "surge"
+      ? ("Surge 导入 · " + (s.source_name || "") + (s.source_at ? " · " + s.source_at : ""))
+      : (s.configured ? "手填 nodes.json（备用）" : "未配置 — 请先导入 Surge 配置");
     $("set-core").textContent = s.binary || "未找到 sing-box（见 fetch-core.ps1）";
     if(s.error) showErr(s.error); else if(state.running) showErr("");
     if(state.running){ await loadGroups(); await loadMode(); } 
@@ -271,12 +282,50 @@ document.querySelectorAll(".tabbar button").forEach(b => {
     document.querySelectorAll(".page").forEach(p => p.classList.toggle("sel", p.id === "page-" + b.dataset.page));
   };
 });
+function renderReport(rep){
+  if(!rep){ $("imp-result").innerHTML = ""; return; }
+  let h = '<div style="font-size:13.5px;line-height:1.75">'
+    + '✅ 导入完成：节点 <b>' + rep.nodes_ok + '</b> 个 · 策略组 <b>' + rep.groups_ok + '</b> 个 · 分流规则 <b>' + rep.rules_ok + '</b> 条'
+    + (rep.rules_deduped ? '（另 ' + rep.rules_deduped + ' 条与内置规则集路由一致，已去重）' : '')
+    + (rep.nodes_skipped ? ' · 跳过节点 ' + rep.nodes_skipped + ' 个' : '')
+    + (rep.final_policy ? '<br>FINAL 指向：' + rep.final_policy : '')
+    + '</div>';
+  if((rep.engine_pending || []).length){
+    h += '<div style="font-size:13.5px;margin-top:6px">📦 已导入 · 引擎待上线（v0.4）：</div>'
+      + '<div style="font-size:12.5px;color:#3a3a3c;line-height:1.7">'
+      + rep.engine_pending.map(p => '· [' + p.section + '] ' + p.summary + '（已完整保存，引擎上线后生效）').join('<br>')
+      + '</div>';
+  }
+  (rep.notes || []).forEach(n => { h += '<div class="hint">ℹ️ ' + n + '</div>'; });
+  (rep.ignored_params || []).length && (h += '<div class="hint">无 sing-box 对应、已忽略的参数：' + rep.ignored_params.join("、") + '</div>');
+  if((rep.unmigrated || []).length){
+    h += '<div style="font-size:13.5px;margin-top:6px">未迁移 ' + rep.unmigrated.length + ' 条：</div>'
+      + '<div style="font-size:12.5px;color:#3a3a3c;line-height:1.7">'
+      + rep.unmigrated.map(u => '· [' + u.section + '] ' + u.desc + ' — ' + u.reason).join('<br>')
+      + '</div>';
+  }
+  $("imp-result").innerHTML = h;
+}
+async function loadSource(){
+  try{ const s = await j("/api/source"); if(s.report) renderReport(s.report); }catch(e){ /* 忽略 */ }
+}
+$("btn-import").onclick = async () => {
+  const f = $("imp-file").files[0];
+  if(!f){ showErr("先选择一个 Surge .conf 文件"); return; }
+  const fd = new FormData(); fd.append("file", f);
+  try{
+    const r = await fetch("/api/import", { method:"POST", body: fd });
+    const t = await r.json();
+    if(!r.ok) throw new Error(t.error || ("HTTP " + r.status));
+    renderReport(t); showErr(""); refreshStatus();
+  }catch(e){ showErr(e); }
+};
 $("test-all").onclick = () => testMembers(Object.keys(state.nodes));
 $("btn-reload").onclick = async () => { try{ await j("/api/restart", {method:"POST"}); }catch(e){ showErr(e); } refreshStatus(); };
 $("btn-restart").onclick = async () => { try{ await j("/api/restart", {method:"POST"}); }catch(e){ showErr(e); } refreshStatus(); };
 $("btn-proxy-on").onclick = async () => { try{ await j("/api/sysproxy", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({on:true})}); }catch(e){ showErr(e); } };
 $("btn-proxy-off").onclick = async () => { try{ await j("/api/sysproxy", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({on:false})}); }catch(e){ showErr(e); } };
-refreshStatus(); setInterval(refreshStatus, 8000); setInterval(pollTraffic, 2000);
+refreshStatus(); loadSource(); setInterval(refreshStatus, 8000); setInterval(pollTraffic, 2000);
 </script>
 </body>
 </html>

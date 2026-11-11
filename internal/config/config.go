@@ -31,12 +31,25 @@ type Node struct {
 	Method       string `json:"method,omitempty"` // shadowsocks cipher
 	ObfsPassword string `json:"obfs_password,omitempty"`
 
+	Plugin     string `json:"plugin,omitempty"`      // shadowsocks plugin (e.g. obfs-local)
+	PluginOpts string `json:"plugin_opts,omitempty"` // shadowsocks plugin options
+
+	Network     string `json:"network,omitempty"`      // transport: ws|grpc (vless/vmess/trojan)
+	WSPath      string `json:"ws_path,omitempty"`      // ws path
+	WSHost      string `json:"ws_host,omitempty"`      // ws Host header
+	ServiceName string `json:"service_name,omitempty"` // grpc service name
+	TLS         bool   `json:"tls,omitempty"`          // force TLS (http/https, vmess tls=true)
+
 	SNI              string `json:"sni,omitempty"`
 	Insecure         bool   `json:"insecure,omitempty"`
 	RealityPublicKey string `json:"reality_public_key,omitempty"`
 	RealityShortID   string `json:"reality_short_id,omitempty"`
 	TFO              bool   `json:"tfo,omitempty"` // TCP Fast Open (dialer option)
-	Tag              string `json:"-"`             // resolved unique outbound tag
+	// Tag is the resolved unique outbound tag. It is serialized so
+	// persisted models (the Surge importer's imported.json) survive
+	// a save/load round trip; Load always recomputes it for
+	// nodes.json files.
+	Tag string `json:"tag,omitempty"`
 }
 
 // File is the on-disk shape of nodes.json.
@@ -74,6 +87,23 @@ func Load(path string) (*File, error) {
 	return &f, nil
 }
 
+func transportBlock(n *Node) map[string]any {
+	switch n.Network {
+	case "ws":
+		t := map[string]any{"type": "ws"}
+		if n.WSPath != "" {
+			t["path"] = n.WSPath
+		}
+		if n.WSHost != "" {
+			t["headers"] = map[string]any{"Host": n.WSHost}
+		}
+		return t
+	case "grpc":
+		return map[string]any{"type": "grpc", "service_name": n.ServiceName}
+	}
+	return nil
+}
+
 func tlsBlock(n *Node) map[string]any {
 	tls := map[string]any{"enabled": true}
 	if n.SNI != "" {
@@ -92,6 +122,10 @@ func tlsBlock(n *Node) map[string]any {
 	}
 	return tls
 }
+
+// OutboundFor converts one Node into a sing-box outbound object
+// (exported for the Surge importer's standalone config builder).
+func OutboundFor(n *Node) (map[string]any, error) { return outbound(n) }
 
 // outbound converts one Node into a sing-box outbound object.
 func outbound(n *Node) (map[string]any, error) {
@@ -145,8 +179,11 @@ func outbound(n *Node) (map[string]any, error) {
 		if n.Flow != "" {
 			ob["flow"] = n.Flow
 		}
-		if n.SNI != "" || n.RealityPublicKey != "" || n.Flow != "" {
+		if n.TLS || n.SNI != "" || n.RealityPublicKey != "" || n.Flow != "" {
 			ob["tls"] = tlsBlock(n)
+		}
+		if t := transportBlock(n); t != nil {
+			ob["transport"] = t
 		}
 	case "vmess":
 		ob["uuid"] = n.UUID
@@ -156,15 +193,48 @@ func outbound(n *Node) (map[string]any, error) {
 		}
 		ob["security"] = sec
 		ob["alter_id"] = n.AlterID
-		if n.SNI != "" {
+		if n.TLS || n.SNI != "" {
 			ob["tls"] = tlsBlock(n)
+		}
+		if t := transportBlock(n); t != nil {
+			ob["transport"] = t
 		}
 	case "trojan":
 		ob["password"] = n.Password
 		ob["tls"] = tlsBlock(n)
+		if t := transportBlock(n); t != nil {
+			ob["transport"] = t
+		}
 	case "shadowsocks":
 		ob["method"] = n.Method
 		ob["password"] = n.Password
+		if n.Plugin != "" {
+			ob["plugin"] = n.Plugin
+			if n.PluginOpts != "" {
+				ob["plugin_opts"] = n.PluginOpts
+			}
+		}
+	case "http":
+		if n.Username != "" {
+			ob["username"] = n.Username
+		}
+		if n.Password != "" {
+			ob["password"] = n.Password
+		}
+		if n.TLS {
+			ob["tls"] = tlsBlock(n)
+		}
+	case "socks":
+		ob["version"] = "5"
+		if n.Username != "" {
+			ob["username"] = n.Username
+		}
+		if n.Password != "" {
+			ob["password"] = n.Password
+		}
+		if n.TLS {
+			ob["tls"] = tlsBlock(n)
+		}
 	default:
 		return nil, fmt.Errorf("node %s: unsupported type %q", n.Name, n.Type)
 	}
@@ -173,6 +243,35 @@ func outbound(n *Node) (map[string]any, error) {
 
 const ruleSetBase = "https://raw.githubusercontent.com/slynnnn/surge-rules/main/platforms/singbox/merged/"
 
+// SingboxRulesBase is the raw-content root of the surge-rules repo's
+// sing-box rule-set tree; the Surge importer maps repo rule lists to
+// <base>/<category>/<name>.json under it.
+const SingboxRulesBase = "https://raw.githubusercontent.com/slynnnn/surge-rules/main/platforms/singbox/"
+
+// RemoteRuleSet builds a remote rule-set definition in the same shape
+// as the built-in ones (source format, direct download detour).
+func RemoteRuleSet(tag, url string) map[string]any {
+	return map[string]any{
+		"type":            "remote",
+		"tag":             tag,
+		"format":          "source",
+		"url":             url,
+		"download_detour": "direct",
+		"update_interval": "24h",
+	}
+}
+
+// Extra carries additional structure merged into the generated config:
+// imported policy groups, custom route rules (inserted before the
+// rule-set rules so hand-written rules win) and extra remote rule-sets.
+// Used by the Surge importer; nil for plain nodes.json operation.
+type Extra struct {
+	Groups        []map[string]any // selector/urltest outbounds, panel order
+	CustomRules   []any            // route rules, rule mode only
+	ExtraRuleSets []any            // additional route.rule_set definitions
+	Final         string           // route final for rule mode ("" = default)
+}
+
 // Build renders the complete sing-box configuration for the loaded nodes.
 // mode is the routing mode: "rule" (rule-set based split routing),
 // "global" (everything via 节点选择), or "direct" (everything direct).
@@ -180,6 +279,14 @@ const ruleSetBase = "https://raw.githubusercontent.com/slynnnn/surge-rules/main/
 // mode-list only contains "rule"), so SakuNet implements mode switching
 // at the app layer: regenerate the route section and restart the core.
 func Build(f *File, mode string) (map[string]any, error) {
+	return BuildEx(f, mode, nil)
+}
+
+// BuildEx is Build plus an Extra (imported groups/rules/rule-sets).
+// An imported group whose tag equals a built-in group tag shadows the
+// built-in one; the built-in 节点选择 (when not shadowed) gains the
+// imported groups as members so the panel home keeps working.
+func BuildEx(f *File, mode string, extra *Extra) (map[string]any, error) {
 	tags := make([]string, 0, len(f.Nodes))
 	outbounds := []any{}
 	selector := func(tag string, members []string) map[string]any {
@@ -199,14 +306,31 @@ func Build(f *File, mode string) (map[string]any, error) {
 		tags = append(tags, f.Nodes[i].Tag)
 		nodeOutbounds = append(nodeOutbounds, ob)
 	}
-	mainMembers := append(append([]string{}, tags...), "direct")
-	outbounds = append(outbounds,
-		selector("节点选择", mainMembers),
-		selector("AI", tags),
-		selector("流媒体", tags),
-		selector("社交", tags),
-		selector("漏网之鱼", tags),
-	)
+	extraTags := []string{}
+	shadowed := map[string]bool{}
+	if extra != nil {
+		for _, g := range extra.Groups {
+			tag, _ := g["tag"].(string)
+			extraTags = append(extraTags, tag)
+			shadowed[tag] = true
+			outbounds = append(outbounds, g)
+		}
+	}
+	builtins := []struct {
+		tag     string
+		members []string
+	}{
+		{"节点选择", append(append(append([]string{}, extraTags...), tags...), "direct")},
+		{"AI", tags},
+		{"流媒体", tags},
+		{"社交", tags},
+		{"漏网之鱼", tags},
+	}
+	for _, b := range builtins {
+		if !shadowed[b.tag] {
+			outbounds = append(outbounds, selector(b.tag, b.members))
+		}
+	}
 	outbounds = append(outbounds, nodeOutbounds...)
 	outbounds = append(outbounds, map[string]any{"type": "direct", "tag": "direct"})
 
@@ -240,6 +364,30 @@ func Build(f *File, mode string) (map[string]any, error) {
 		})
 	}
 
+	ruleSetDefs := []any{
+		ruleSet("ads", "ads.json"),
+		ruleSet("ai", "ai.json"),
+		ruleSet("streaming", "streaming.json"),
+		ruleSet("social", "social.json"),
+		ruleSet("global", "global.json"),
+		ruleSet("china", "china.json"),
+	}
+	rules := routeRules(mode)
+	final := routeFinal(mode)
+	if extra != nil {
+		ruleSetDefs = append(ruleSetDefs, extra.ExtraRuleSets...)
+		if mode == "rule" {
+			if len(extra.CustomRules) > 0 {
+				merged := append([]any{}, rules[:2]...)
+				merged = append(merged, extra.CustomRules...)
+				rules = append(merged, rules[2:]...)
+			}
+			if extra.Final != "" {
+				final = extra.Final
+			}
+		}
+	}
+
 	cfg := map[string]any{
 		"log": map[string]any{"level": "info", "timestamp": true},
 		"dns": map[string]any{
@@ -259,17 +407,10 @@ func Build(f *File, mode string) (map[string]any, error) {
 		"inbounds":  inbounds,
 		"outbounds": outbounds,
 		"route": map[string]any{
-			"rule_set": []any{
-				ruleSet("ads", "ads.json"),
-				ruleSet("ai", "ai.json"),
-				ruleSet("streaming", "streaming.json"),
-				ruleSet("social", "social.json"),
-				ruleSet("global", "global.json"),
-				ruleSet("china", "china.json"),
-			},
-			"rules":                 routeRules(mode),
+			"rule_set":              ruleSetDefs,
+			"rules":                 rules,
 			"auto_detect_interface": true,
-			"final":                 routeFinal(mode),
+			"final":                 final,
 			"default_domain_resolver": map[string]any{
 				"server": "dns-local",
 			},
