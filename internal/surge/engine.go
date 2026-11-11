@@ -6,10 +6,11 @@ import (
 )
 
 // convertEngineSections parses [MITM], [URL Rewrite] and [Script]
-// into imp.Engine and records them in the report as
-// EnginePending — preserved in full, awaiting the v0.4 engine.
-// They deliberately do not appear in Report.Unmigrated: nothing
-// about them is lost.
+// into imp.Engine and records them in the report as engine-backed
+// sections: preserved in full and (since v1.0) executed by the
+// MITM/rewrite engine — MITM and URL Rewrite live, Script stored
+// but never executed (no JS engine). They deliberately do not
+// appear in Report.Unmigrated: nothing about them is lost.
 func convertEngineSections(rc *rawConfig, imp *Imported) {
 	rep := &imp.Report
 

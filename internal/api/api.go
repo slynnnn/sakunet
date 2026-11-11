@@ -120,3 +120,65 @@ func (c *Client) Connections(ctx context.Context) (map[string]any, error) {
 	var v map[string]any
 	return v, json.Unmarshal(raw, &v)
 }
+
+// Connection is one live connection as reported by /connections.
+// Only fields sing-box actually provides are mapped; nothing is
+// synthesised.
+type Connection struct {
+	ID          string   `json:"id"`
+	Host        string   `json:"host"`
+	DestPort    string   `json:"destination_port,omitempty"`
+	Network     string   `json:"network,omitempty"`
+	Rule        string   `json:"rule,omitempty"`
+	RulePayload string   `json:"rule_payload,omitempty"`
+	Chains      []string `json:"chains"`
+	Upload      int64    `json:"upload"`
+	Download    int64    `json:"download"`
+	Start       string   `json:"start,omitempty"`
+}
+
+// Activity is the parsed /connections payload for the activity tab.
+type Activity struct {
+	DownloadTotal int64        `json:"downloadTotal"`
+	UploadTotal   int64        `json:"uploadTotal"`
+	Connections   []Connection `json:"connections"`
+}
+
+// Activity fetches and parses /connections including the live
+// connection list.
+func (c *Client) Activity(ctx context.Context) (*Activity, error) {
+	raw, err := c.do(ctx, http.MethodGet, "/connections", nil)
+	if err != nil {
+		return nil, err
+	}
+	var wire struct {
+		DownloadTotal int64 `json:"downloadTotal"`
+		UploadTotal   int64 `json:"uploadTotal"`
+		Connections   []struct {
+			ID       string `json:"id"`
+			Metadata struct {
+				Host            string `json:"host"`
+				DestinationPort string `json:"destinationPort"`
+				Network         string `json:"network"`
+			} `json:"metadata"`
+			Upload      int64    `json:"upload"`
+			Download    int64    `json:"download"`
+			Start       string   `json:"start"`
+			Chains      []string `json:"chains"`
+			Rule        string   `json:"rule"`
+			RulePayload string   `json:"rulePayload"`
+		} `json:"connections"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return nil, err
+	}
+	act := &Activity{DownloadTotal: wire.DownloadTotal, UploadTotal: wire.UploadTotal, Connections: []Connection{}}
+	for _, cn := range wire.Connections {
+		act.Connections = append(act.Connections, Connection{
+			ID: cn.ID, Host: cn.Metadata.Host, DestPort: cn.Metadata.DestinationPort,
+			Network: cn.Metadata.Network, Rule: cn.Rule, RulePayload: cn.RulePayload,
+			Chains: cn.Chains, Upload: cn.Upload, Download: cn.Download, Start: cn.Start,
+		})
+	}
+	return act, nil
+}

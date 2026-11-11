@@ -22,10 +22,17 @@ import (
 	"sakunet/internal/api"
 	"sakunet/internal/config"
 	"sakunet/internal/core"
+	"sakunet/internal/diag"
+	"sakunet/internal/elevate"
+	"sakunet/internal/links"
 	"sakunet/internal/surge"
 	"sakunet/internal/sysproxy"
+	"sakunet/internal/tray"
 	"sakunet/web"
 )
+
+// Version is the SakuNet release version.
+const Version = "v1.0"
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -159,7 +166,7 @@ func main() {
 			Group string `json:"group"`
 			Name  string `json:"name"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
 			errJSON(w, err)
 			return
 		}
@@ -218,12 +225,149 @@ func main() {
 			"uploadTotal":   v["uploadTotal"],
 		})
 	})
+	mux.HandleFunc("/api/activity", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		act, err := clash.Activity(ctx)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, act)
+	})
+	mux.HandleFunc("/api/tun", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body struct {
+				On bool `json:"on"`
+			}
+			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+				errJSON(w, err)
+				return
+			}
+			if err := mgr.SetTun(body.On); err != nil {
+				errJSON(w, err)
+				return
+			}
+		}
+		writeJSON(w, 200, map[string]any{"tun": mgr.Tun(), "admin": elevate.IsAdmin()})
+	})
+	mux.HandleFunc("/api/elevate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			errJSON(w, fmt.Errorf("POST required"))
+			return
+		}
+		if err := elevate.Relaunch(); err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]string{"ok": "1"})
+		// Give the elevated instance a moment to come up, then exit
+		// so the dashboard port and core hand over cleanly.
+		go func() {
+			time.Sleep(800 * time.Millisecond)
+			_ = mgr.Stop()
+			os.Exit(0)
+		}()
+	})
+	mux.HandleFunc("/api/import-links", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			errJSON(w, fmt.Errorf("POST required"))
+			return
+		}
+		var body struct {
+			Text string `json:"text"`
+			URL  string `json:"url"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+			errJSON(w, err)
+			return
+		}
+		data := []byte(body.Text)
+		if body.URL != "" {
+			fetched, err := fetchSubscription(body.URL)
+			if err != nil {
+				errJSON(w, err)
+				return
+			}
+			data = fetched
+		}
+		if len(data) == 0 {
+			errJSON(w, fmt.Errorf("粘贴分享链接或填写订阅 URL"))
+			return
+		}
+		nodes, errs := links.ParseSubscription(data)
+		added := 0
+		var impErr error
+		if len(nodes) > 0 {
+			added, impErr = mgr.ImportNodes(nodes)
+		}
+		errStrs := []string{}
+		for _, e := range errs {
+			errStrs = append(errStrs, e.Error())
+		}
+		if impErr != nil {
+			errStrs = append(errStrs, impErr.Error())
+		}
+		writeJSON(w, 200, map[string]any{"parsed": len(nodes), "added": added, "errors": errStrs})
+	})
+	mux.HandleFunc("/api/import-module", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			errJSON(w, fmt.Errorf("POST required"))
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			errJSON(w, fmt.Errorf("缺少上传文件：%w", err))
+			return
+		}
+		defer file.Close()
+		data, err := io.ReadAll(io.LimitReader(file, 4<<20))
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		mr, err := mgr.ImportModule(safeDisplayName(header.Filename), data)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"name":      mr.Name,
+			"hostnames": len(mr.Hostnames),
+			"rewrites":  len(mr.Rewrites),
+			"scripts":   len(mr.ScriptNames),
+			"notes":     mr.Notes,
+		})
+	})
+	mux.HandleFunc("/api/selfcheck", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, diag.RunChecks(mgr, clash))
+	})
+	mux.HandleFunc("/api/diagnostics", func(w http.ResponseWriter, r *http.Request) {
+		bundle, _, err := diag.BuildBundle(mgr, clash, Version)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", "attachment; filename=sakunet-diagnostics.zip")
+		_, _ = w.Write(bundle)
+	})
+	mux.HandleFunc("/api/mitm/ca.cer", func(w http.ResponseWriter, r *http.Request) {
+		der, err := mgr.EngineCA()
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
+		w.Header().Set("Content-Disposition", "attachment; filename=sakunet-ca.cer")
+		_, _ = w.Write(der)
+	})
 	mux.HandleFunc("/api/mode", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			var body struct {
 				Mode string `json:"mode"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
 				errJSON(w, err)
 				return
 			}
@@ -250,7 +394,7 @@ func main() {
 			errJSON(w, err)
 			return
 		}
-		rep, err := mgr.ImportSurge(header.Filename, data)
+		rep, err := mgr.ImportSurge(safeDisplayName(header.Filename), data)
 		if rep != nil {
 			writeJSON(w, 200, rep)
 			return
@@ -274,13 +418,13 @@ func main() {
 		var body struct {
 			On bool `json:"on"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
 			errJSON(w, err)
 			return
 		}
 		var err error
 		if body.On {
-			err = sysproxy.Set("127.0.0.1:2080")
+			err = sysproxy.Set(mgr.SysproxyAddr())
 		} else {
 			err = sysproxy.Clear()
 		}
@@ -291,6 +435,83 @@ func main() {
 		writeJSON(w, 200, map[string]string{"ok": "1"})
 	})
 
-	log.Printf("SakuNet dashboard: http://%s", *addr)
-	log.Fatal(http.ListenAndServe(*addr, mux))
+	dashURL := "http://" + *addr
+	log.Printf("SakuNet %s dashboard: %s", Version, dashURL)
+	srv := &http.Server{Addr: *addr, Handler: mux}
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	if tray.Supported() {
+		cb := tray.Callbacks{
+			Status: func() (bool, string) {
+				st := mgr.Status()
+				return st.Running, st.Mode
+			},
+			Start: mgr.Start,
+			Stop:  mgr.Stop,
+			SetMode: func(mode string) error {
+				return mgr.SetMode(mode)
+			},
+			OpenPanel: func() { tray.OpenBrowser(dashURL) },
+			Quit: func() {
+				_ = mgr.Stop()
+				os.Exit(0)
+			},
+		}
+		if err := tray.Run(cb); err != nil {
+			log.Printf("tray: %v", err)
+			log.Fatal(<-errCh)
+		}
+		return
+	}
+	log.Fatal(<-errCh)
+}
+
+// safeDisplayName reduces an uploaded filename to its base name for
+// display/storage as metadata. It is never used as a filesystem
+// path, but keep it clean anyway (path traversal defence in depth).
+func safeDisplayName(name string) string {
+	base := name
+	for i := len(base) - 1; i >= 0; i-- {
+		if base[i] == '/' || base[i] == '\\' {
+			base = base[i+1:]
+			break
+		}
+	}
+	if base == "" || base == "." || base == ".." {
+		return "upload.conf"
+	}
+	return base
+}
+
+// fetchSubscription downloads a subscription URL (http/https only,
+// 4 MiB cap, 15 s timeout).
+func fetchSubscription(rawURL string) ([]byte, error) {
+	u, err := parseHTTPURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "SakuNet/"+Version)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("拉取订阅失败：%w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("拉取订阅失败：HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+}
+
+func parseHTTPURL(raw string) (string, error) {
+	for _, p := range []string{"https://", "http://"} {
+		if len(raw) > len(p) && raw[:len(p)] == p {
+			return raw, nil
+		}
+	}
+	return "", fmt.Errorf("订阅 URL 只支持 http/https")
 }

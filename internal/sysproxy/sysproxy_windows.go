@@ -8,6 +8,7 @@ package sysproxy
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -56,6 +57,31 @@ func Clear() error {
 	}
 	notify()
 	return nil
+}
+
+func regQuery(name string) (string, error) {
+	out, err := exec.Command("reg", "query", regKey, "/v", name).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("reg query %s: %v", name, err)
+	}
+	// Output shape: "    ProxyEnable    REG_DWORD    0x1"
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 3 && f[0] == name {
+			return f[len(f)-1], nil
+		}
+	}
+	return "", fmt.Errorf("reg query %s: value not found", name)
+}
+
+// Current reports (enabled, server) of the per-user system proxy.
+func Current() (bool, string, error) {
+	en, err := regQuery("ProxyEnable")
+	if err != nil {
+		return false, "", err
+	}
+	srv, _ := regQuery("ProxyServer")
+	return en == "0x1", srv, nil
 }
 
 var _ = unsafe.Sizeof(0)

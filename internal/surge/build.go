@@ -33,6 +33,11 @@ func mainTarget(imp *Imported) string {
 // built-in rule-set routing exists only in the nodes.json fallback
 // path (config.Build).
 func BuildImported(imp *Imported, mode string) (map[string]any, error) {
+	return BuildImportedTun(imp, mode, false)
+}
+
+// BuildImportedTun is BuildImported with an optional TUN inbound.
+func BuildImportedTun(imp *Imported, mode string, tun bool) (map[string]any, error) {
 	outbounds := []any{}
 	for i := range imp.Groups {
 		outbounds = append(outbounds, imp.Groups[i].Outbound())
@@ -83,14 +88,7 @@ func BuildImported(imp *Imported, mode string) (map[string]any, error) {
 			"final":    "dns-remote",
 			"strategy": "prefer_ipv4",
 		},
-		"inbounds": []any{
-			map[string]any{
-				"type":        "mixed",
-				"tag":         "mixed-in",
-				"listen":      "127.0.0.1",
-				"listen_port": 2080,
-			},
-		},
+		"inbounds":  importedInbounds(tun),
 		"outbounds": outbounds,
 		"route": map[string]any{
 			"rule_set":              ruleSetDefs,
@@ -168,14 +166,38 @@ func LoadImported(path string) (*Imported, error) {
 	return &imp, nil
 }
 
+// importedInbounds renders the mixed inbound plus, when tun is on,
+// a TUN inbound (same shape as the nodes.json path).
+func importedInbounds(tun bool) []any {
+	in := []any{
+		map[string]any{
+			"type":        "mixed",
+			"tag":         "mixed-in",
+			"listen":      "127.0.0.1",
+			"listen_port": 2080,
+		},
+	}
+	if tun {
+		in = append(in, map[string]any{
+			"type":         "tun",
+			"tag":          "tun-in",
+			"address":      []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"},
+			"auto_route":   true,
+			"strict_route": true,
+			"stack":        "mixed",
+		})
+	}
+	return in
+}
+
 // GenerateImported loads a persisted import and writes the sing-box
 // config JSON to outPath.
-func GenerateImported(importedPath, outPath, mode string) error {
+func GenerateImported(importedPath, outPath, mode string, tun ...bool) error {
 	imp, err := LoadImported(importedPath)
 	if err != nil {
 		return err
 	}
-	cfg, err := BuildImported(imp, mode)
+	cfg, err := BuildImportedTun(imp, mode, len(tun) > 0 && tun[0])
 	if err != nil {
 		return err
 	}

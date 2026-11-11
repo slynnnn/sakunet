@@ -110,6 +110,14 @@
     <div id="groups"><div class="hint">还没有配置：先到「设置」页导入你的 Surge 配置，节点、策略组与分流会自动生成。</div></div>
   </div>
 
+  <!-- 活动记录页 -->
+  <div class="page" id="page-activity">
+    <div class="card" style="padding:8px 16px">
+      <div class="row" style="border:0"><span style="font-weight:600">活动记录</span><span class="val" id="act-total">—</span></div>
+    </div>
+    <div class="card" id="act-list" style="padding:6px 0"><div class="hint" style="padding:8px 16px">内核启动后显示当前连接。</div></div>
+  </div>
+
   <!-- 节点页 -->
   <div class="page" id="page-nodes">
     <div class="card" style="padding:8px 16px">
@@ -127,6 +135,35 @@
       <div class="hint" style="padding:6px 16px">导入在本机完成，不上传任何内容；导入后该文件即为生效配置，路由完全按它的规则生成。</div>
       <div id="imp-result" style="padding:2px 16px 10px"></div>
     </div>
+    <div class="sec-title">导入分享链接 / 订阅</div>
+    <div class="card" style="padding:10px 16px">
+      <textarea id="link-text" rows="3" placeholder="粘贴分享链接，一行一条：snell:// anytls:// hysteria2:// ss:// trojan:// vmess:// vless://" style="width:100%;font-size:12.5px;border:.5px solid #d1d1d6;border-radius:8px;padding:8px"></textarea>
+      <div class="row" style="padding:8px 0 0"><span>或订阅 URL</span><span><input type="text" id="link-url" placeholder="https://…" style="width:190px;font-size:12.5px"></span></div>
+      <div class="row" style="padding:8px 0 0"><span>解析后并入当前节点集</span><button class="btn" id="btn-links">导入</button></div>
+      <div id="link-result" style="font-size:12.5px;line-height:1.7"></div>
+    </div>
+    <div class="sec-title">导入模块（.sgmodule）</div>
+    <div class="card" style="padding:6px 0">
+      <div class="row"><span>选择 .sgmodule 文件</span><span><input type="file" id="mod-file" accept=".sgmodule,.txt" style="max-width:190px;font-size:12.5px"></span></div>
+      <div class="row"><span>其 MITM 主机名与重写规则并入引擎生效；脚本部分不执行</span><button class="btn" id="btn-module">导入</button></div>
+      <div id="mod-result" style="padding:2px 16px 10px;font-size:12.5px;line-height:1.7"></div>
+    </div>
+    <div class="sec-title">MITM / 重写引擎</div>
+    <div class="card" style="padding:6px 0">
+      <div class="row"><span>引擎状态</span><span class="val" id="mitm-state">—</span></div>
+      <div class="row"><span>CA 证书</span><span class="val" id="mitm-ca">—</span></div>
+      <div class="row"><span>CA 指纹（SHA-256）</span><span class="val" id="mitm-fp" style="font-size:10.5px">—</span></div>
+      <div class="row"><span>下载 CA 证书并安装到 Windows 信任库</span><span><a class="btn gray" style="text-decoration:none;display:inline-block;line-height:30px" href="/api/mitm/ca.cer">下载 .cer</a></span></div>
+      <div class="hint" style="padding:6px 16px">安装方法：下载后双击 → 安装证书 → 本地计算机 → 放入「受信任的根证书颁发机构」；或管理员命令行运行 <span style="font-family:monospace">certutil -addstore -f Root sakunet-ca.cer</span>。只有导入配置 [MITM] 名单内的主机才会被解密重写，其余 HTTPS 原样透传。</div>
+      <div id="mitm-unsupported" style="padding:2px 16px 10px;font-size:12.5px;line-height:1.7"></div>
+    </div>
+    <div class="sec-title">自检与诊断</div>
+    <div class="card" style="padding:6px 0">
+      <div class="row"><span>一键自检（逐项真跑）</span><button class="btn" id="btn-selfcheck">开始自检</button></div>
+      <div id="check-list" style="padding:2px 16px 10px;font-size:13.5px;line-height:1.8"></div>
+      <div class="row"><span>导出诊断包（已自动脱敏）</span><span><a class="btn gray" style="text-decoration:none;display:inline-block;line-height:30px" href="/api/diagnostics">下载 .zip</a></span></div>
+      <div class="hint" style="padding:6px 16px">出问题先点自检；看不懂就下载诊断包发回来，节点地址、密码和 CA 内容已打码，可以放心发。</div>
+    </div>
     <div class="sec-title">配置</div>
     <div class="card" style="padding:6px 0">
       <div class="row"><span>当前生效来源</span><span class="val" id="set-source">—</span></div>
@@ -135,17 +172,25 @@
       <div class="row"><span>重载配置</span><button class="btn gray" id="btn-reload">重载</button></div>
       <div class="row"><span>重启内核</span><button class="btn gray" id="btn-restart">重启</button></div>
     </div>
+    <div class="sec-title">TUN 模式（Windows）</div>
+    <div class="card" style="padding:6px 0">
+      <div class="row"><span>TUN 入站（接管全机流量）</span><span class="val" id="tun-state">—</span></div>
+      <div class="row"><span>切换后内核按新入站重启</span><span><button class="btn gray" id="btn-tun-on">开启</button> <button class="btn gray" id="btn-tun-off">关闭</button></span></div>
+      <div class="row"><span>需要管理员权限</span><span><button class="btn gray" id="btn-elevate">以管理员重启 SakuNet</button></span></div>
+      <div class="hint" style="padding:6px 16px">TUN 在 Windows 上需要管理员权限运行；未提权时开启可能导致内核启动失败。</div>
+    </div>
     <div class="sec-title">系统代理（Windows）</div>
     <div class="card" style="padding:6px 0">
-      <div class="row"><span>系统代理 127.0.0.1:2080</span><span><button class="btn gray" id="btn-proxy-on">开启</button> <button class="btn gray" id="btn-proxy-off">关闭</button></span></div>
+      <div class="row"><span>系统代理（MITM 引擎运行时自动经引擎）</span><span><button class="btn gray" id="btn-proxy-on">开启</button> <button class="btn gray" id="btn-proxy-off">关闭</button></span></div>
     </div>
-    <div class="hint">SakuNet v0.3 · 内核为 sing-box 侧车进程 · 规则集来自 slynnnn/surge-rules，每日自动更新。</div>
+    <div class="hint">SakuNet v1.0 · QX 的操作与设计语言 + Surge 配置全兼容 · 内核为 sing-box 侧车进程。</div>
     <div class="err" id="err2"></div>
   </div>
 </div>
 
 <nav class="tabbar">
   <button data-page="home" class="sel"><span class="ic">🏠</span>主页</button>
+  <button data-page="activity"><span class="ic">📈</span>活动</button>
   <button data-page="nodes"><span class="ic">📋</span>节点</button>
   <button data-page="settings"><span class="ic">⚙️</span>设置</button>
 </nav>
@@ -248,6 +293,18 @@ async function refreshStatus(){
       ? ("Surge 导入 · " + (s.source_name || "") + (s.source_at ? " · " + s.source_at : ""))
       : (s.configured ? "手填 nodes.json（备用）" : "未配置 — 请先导入 Surge 配置");
     $("set-core").textContent = s.binary || "未找到 sing-box（见 fetch-core.ps1）";
+    const mi = s.mitm || {};
+    $("mitm-state").textContent = mi.state === "running"
+      ? ("运行中 · " + (mi.addr || "") + " · 主机名 " + (mi.hostnames || 0) + " · 规则 " + (mi.rules_ok || 0))
+      : ("待机" + (mi.reason ? "：" + mi.reason : ""));
+    $("mitm-ca").textContent = mi.ca_subject ? (mi.ca_subject + " · 到期 " + (mi.ca_expiry || "")) : "无（见待机原因）";
+    $("mitm-fp").textContent = mi.ca_fingerprint || "—";
+    $("mitm-unsupported").innerHTML = (mi.unsupported && mi.unsupported.length)
+      ? "不支持的重写规则 " + mi.unsupported.length + " 条：<br>" + mi.unsupported.map(u => "· " + u.raw + " — " + u.reason).join("<br>") : "";
+    try{
+      const t = await j("/api/tun");
+      $("tun-state").textContent = (t.tun ? "已开启" : "已关闭") + (t.admin ? " · 管理员" : " · 非管理员");
+    }catch(e){ /* 忽略 */ }
     if(s.error) showErr(s.error); else if(state.running) showErr("");
     if(state.running){ await loadGroups(); await loadMode(); } 
   }catch(e){ showErr(e); }
@@ -291,9 +348,9 @@ function renderReport(rep){
     + (rep.final_policy ? '<br>FINAL 指向：' + rep.final_policy : '')
     + '</div>';
   if((rep.engine_pending || []).length){
-    h += '<div style="font-size:13.5px;margin-top:6px">📦 已导入 · 引擎待上线（v0.4）：</div>'
+    h += '<div style="font-size:13.5px;margin-top:6px">📦 引擎数据（MITM/重写引擎运行时生效，脚本仅保存不执行）：</div>'
       + '<div style="font-size:12.5px;color:#3a3a3c;line-height:1.7">'
-      + rep.engine_pending.map(p => '· [' + p.section + '] ' + p.summary + '（已完整保存，引擎上线后生效）').join('<br>')
+      + rep.engine_pending.map(p => '· [' + p.section + '] ' + p.summary + '（已并入引擎数据，内核运行时生效）').join('<br>')
       + '</div>';
   }
   (rep.notes || []).forEach(n => { h += '<div class="hint">ℹ️ ' + n + '</div>'; });
@@ -320,6 +377,68 @@ $("btn-import").onclick = async () => {
     renderReport(t); showErr(""); refreshStatus();
   }catch(e){ showErr(e); }
 };
+function fmtBytes(v){ if(v >= 1073741824) return (v/1073741824).toFixed(2)+" GB"; if(v >= 1048576) return (v/1048576).toFixed(1)+" MB"; if(v >= 1024) return (v/1024).toFixed(1)+" KB"; return v+" B"; }
+async function loadActivity(){
+  if(!state.running) return;
+  try{
+    const a = await j("/api/activity");
+    $("act-total").textContent = "↓ " + fmtBytes(a.downloadTotal || 0) + " · ↑ " + fmtBytes(a.uploadTotal || 0) + " · 连接 " + (a.connections || []).length;
+    const box = $("act-list");
+    if(!(a.connections || []).length){ box.innerHTML = '<div class="hint" style="padding:8px 16px">当前没有活动连接。</div>'; return; }
+    box.innerHTML = a.connections.map(c => {
+      const exit = (c.chains && c.chains.length) ? c.chains[c.chains.length - 1] : "—";
+      const rule = c.rule ? (c.rule + (c.rule_payload ? " " + c.rule_payload : "")) : "—";
+      return '<div class="row" style="align-items:flex-start"><span style="min-width:0"><span style="font-size:14px">' + (c.host || "—") + (c.destination_port ? ":" + c.destination_port : "") + '</span>'
+        + '<br><span style="font-size:11.5px;color:#8e8e93">' + rule + ' → ' + exit + '</span></span>'
+        + '<span class="val">↓ ' + fmtBytes(c.download || 0) + '<br>↑ ' + fmtBytes(c.upload || 0) + '</span></div>';
+    }).join("");
+  }catch(e){ /* 忽略 */ }
+}
+$("btn-selfcheck").onclick = async () => {
+  $("check-list").innerHTML = "自检中…（逐项真跑，最多十几秒）";
+  try{
+    const list = await j("/api/selfcheck");
+    $("check-list").innerHTML = list.map(c => {
+      const ic = c.state === "pass" ? "✅" : (c.state === "fail" ? "❌" : "➖");
+      return "<div>" + ic + " " + c.name + (c.detail ? ' <span style="color:#8e8e93;font-size:12.5px">' + c.detail + "</span>" : "")
+        + (c.state === "fail" && c.hint ? '<br><span style="color:#b8860b;font-size:12.5px">怎么办：' + c.hint + "</span>" : "") + "</div>";
+    }).join("");
+  }catch(e){ showErr(e); }
+};
+$("btn-links").onclick = async () => {
+  const text = $("link-text").value.trim(), url = $("link-url").value.trim();
+  if(!text && !url){ showErr("粘贴分享链接或填写订阅 URL"); return; }
+  try{
+    const r = await j("/api/import-links", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({text: text, url: url})});
+    $("link-result").innerHTML = "解析 " + r.parsed + " 个 · 新增 " + r.added + " 个"
+      + ((r.errors || []).length ? "<br>" + r.errors.map(e => "· " + e).join("<br>") : "");
+    refreshStatus();
+  }catch(e){ showErr(e); }
+};
+$("btn-module").onclick = async () => {
+  const f = $("mod-file").files[0];
+  if(!f){ showErr("先选择一个 .sgmodule 文件"); return; }
+  const fd = new FormData(); fd.append("file", f);
+  try{
+    const r = await fetch("/api/import-module", { method:"POST", body: fd });
+    const t = await r.json();
+    if(!r.ok) throw new Error(t.error || ("HTTP " + r.status));
+    $("mod-result").innerHTML = "模块「" + t.name + "」：MITM 主机名 " + t.hostnames + " · 重写规则 " + t.rewrites + "（已生效）"
+      + ((t.notes || []).length ? "<br>" + t.notes.map(n => "· " + n).join("<br>") : "");
+    showErr(""); refreshStatus();
+  }catch(e){ showErr(e); }
+};
+async function setTun(on){
+  try{ await j("/api/tun", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({on: on})}); }catch(e){ showErr(e); }
+  refreshStatus();
+}
+$("btn-tun-on").onclick = () => setTun(true);
+$("btn-tun-off").onclick = () => setTun(false);
+$("btn-elevate").onclick = async () => {
+  try{ await j("/api/elevate", {method:"POST"}); showErr("已请求管理员重启，UAC 确认后本窗口进程退出、新进程接管"); }
+  catch(e){ showErr(e); }
+};
+setInterval(() => { if(document.getElementById("page-activity").classList.contains("sel")) loadActivity(); }, 2500);
 $("test-all").onclick = () => testMembers(Object.keys(state.nodes));
 $("btn-reload").onclick = async () => { try{ await j("/api/restart", {method:"POST"}); }catch(e){ showErr(e); } refreshStatus(); };
 $("btn-restart").onclick = async () => { try{ await j("/api/restart", {method:"POST"}); }catch(e){ showErr(e); } refreshStatus(); };

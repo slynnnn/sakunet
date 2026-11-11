@@ -4,7 +4,12 @@
 sing-box*
 # local user data — contains credentials, never committed
 nodes.json
+imported.json
 sakunet-mode.json
+sakunet-source.json
+sakunet-prefs.json
 sing-box-config.json
 cache.db
 sakunet-core.log
+SakuNet-windows-amd64.zip
+dist/

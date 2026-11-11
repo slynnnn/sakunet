@@ -7,3 +7,8 @@ import "errors"
 
 func Set(addr string) error { return errors.New("system proxy is only supported on Windows") }
 func Clear() error          { return errors.New("system proxy is only supported on Windows") }
+
+// Current reports (enabled, server) of the OS system proxy.
+func Current() (bool, string, error) {
+	return false, "", errors.New("system proxy is only supported on Windows")
+}

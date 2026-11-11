@@ -11,21 +11,24 @@ import (
 	"time"
 
 	"sakunet/internal/config"
+	"sakunet/internal/mitm"
 	"sakunet/internal/surge"
 )
 
 type Status struct {
-	Mode       string `json:"mode"`
-	Running    bool   `json:"running"`
-	PID        int    `json:"pid,omitempty"`
-	Binary     string `json:"binary,omitempty"`
-	NodesFile  string `json:"nodes_file,omitempty"`
-	Version    string `json:"version,omitempty"`
-	Error      string `json:"error,omitempty"`
-	SourceKind string `json:"source_kind"` // nodes | surge
-	SourceName string `json:"source_name,omitempty"`
-	SourceAt   string `json:"source_at,omitempty"`
-	Configured bool   `json:"configured"` // an imported config or a nodes.json exists
+	Mode       string    `json:"mode"`
+	Running    bool      `json:"running"`
+	PID        int       `json:"pid,omitempty"`
+	Binary     string    `json:"binary,omitempty"`
+	NodesFile  string    `json:"nodes_file,omitempty"`
+	Version    string    `json:"version,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	SourceKind string    `json:"source_kind"` // nodes | surge
+	SourceName string    `json:"source_name,omitempty"`
+	SourceAt   string    `json:"source_at,omitempty"`
+	Configured bool      `json:"configured"` // an imported config or a nodes.json exists
+	Tun        bool      `json:"tun"`
+	MITM       *MITMInfo `json:"mitm,omitempty"`
 }
 
 type Manager struct {
@@ -41,6 +44,9 @@ type Manager struct {
 	sourceKind string // "nodes" (hand-written nodes.json) or "surge" (imported)
 	sourceName string
 	sourceAt   time.Time
+	tun        bool
+	mitmSrv    *mitm.Server
+	mitmInfo   *MITMInfo
 }
 
 // sourceMeta is sakunet-source.json: which configuration source is
@@ -74,6 +80,7 @@ func New(nodesPath string) (*Manager, error) {
 		nodesPath = abs
 	}
 	m := &Manager{appDir: dir, nodesPath: nodesPath, mode: "rule", sourceKind: "nodes"}
+	m.loadPrefs()
 	if raw, err := os.ReadFile(m.modePath()); err == nil {
 		var v struct {
 			Mode string `json:"mode"`
@@ -102,9 +109,24 @@ func (m *Manager) importedPath() string   { return filepath.Join(m.appDir, "impo
 // generate renders the sing-box config from the active source.
 func (m *Manager) generate() error {
 	if m.sourceKind == "surge" {
-		return surge.GenerateImported(m.importedPath(), m.configPath(), m.mode)
+		return surge.GenerateImported(m.importedPath(), m.configPath(), m.mode, m.tun)
 	}
-	return config.Generate(m.nodesPath, m.configPath(), m.mode)
+	f, err := config.Load(m.nodesPath)
+	if err != nil {
+		return err
+	}
+	if m.tun {
+		f.Tun = true
+	}
+	cfg, err := config.Build(f, m.mode)
+	if err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.configPath(), append(raw, '\n'), 0o644)
 }
 
 // ImportSurge parses an uploaded Surge .conf, persists it as the
@@ -252,6 +274,7 @@ func (m *Manager) Start() error {
 	if out, err := exec.Command(bin, "version").CombinedOutput(); err == nil {
 		m.version = firstLine(string(out))
 	}
+	m.startEngineLocked()
 	return nil
 }
 
@@ -267,6 +290,7 @@ func firstLine(s string) string {
 // Stop terminates the sidecar if running.
 func (m *Manager) Stop() error {
 	m.mu.Lock()
+	m.stopEngineLocked()
 	cmd, done := m.cmd, m.done
 	m.cmd = nil
 	m.mu.Unlock()
@@ -293,7 +317,7 @@ func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st := Status{Mode: m.mode, Binary: m.binary, NodesFile: m.nodesPath, Version: m.version, Error: m.lastErr,
-		SourceKind: m.sourceKind, SourceName: m.sourceName}
+		SourceKind: m.sourceKind, SourceName: m.sourceName, Tun: m.tun, MITM: m.mitmInfo}
 	st.Configured = m.sourceKind == "surge"
 	if !st.Configured {
 		if _, err := os.Stat(m.nodesPath); err == nil {

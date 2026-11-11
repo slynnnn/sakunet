@@ -316,13 +316,17 @@ func convertGroup(gl rawLine, nodeByName map[string]*config.Node, nodeTags []str
 
 // Outbound renders a GroupDef as a sing-box outbound object.
 func (g *GroupDef) Outbound() map[string]any {
+	members := g.Members
+	if len(members) == 0 { // tampered persisted model: never panic
+		members = []string{"direct"}
+	}
 	ob := map[string]any{
 		"type":      g.Kind,
 		"tag":       g.Name,
-		"outbounds": g.Members,
+		"outbounds": members,
 	}
 	if g.Kind == "selector" {
-		ob["default"] = g.Members[0]
+		ob["default"] = members[0]
 	} else {
 		if g.URL != "" {
 			ob["url"] = g.URL

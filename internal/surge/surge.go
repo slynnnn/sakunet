@@ -29,8 +29,9 @@ type Unmigrated struct {
 
 // PendingSection is one engine-backed section ([MITM],
 // [URL Rewrite], [Script]) that was fully parsed and preserved on
-// import but whose engine ships in a later milestone. It is NOT an
-// unmigrated item: nothing is lost, it just is not live yet.
+// import. Since v1.0 the MITM/rewrite engine executes the first
+// two; [Script] entries are preserved but never executed. It is
+// NOT an unmigrated item: nothing is lost.
 type PendingSection struct {
 	Section string `json:"section"` // MITM | URL Rewrite | Script
 	Count   int    `json:"count"`
@@ -100,6 +101,7 @@ type Imported struct {
 	ExtraRuleSets []map[string]any `json:"extra_rule_sets,omitempty"`
 	Final         string           `json:"final,omitempty"`
 	Engine        EngineData       `json:"engine"`
+	Modules       []ModuleRecord   `json:"modules,omitempty"`
 	Report        Report           `json:"report"`
 }
 
@@ -283,6 +285,13 @@ func Parse(sourceName string, data []byte) (*Imported, error) {
 		rep.GroupsOK++
 		rep.Notes = append(rep.Notes, notes...)
 	}
+
+	// Break group reference cycles (A includes B, B includes A, or
+	// a group that includes itself): sing-box refuses cyclic
+	// outbound dependencies, so a hostile or sloppy config would
+	// otherwise turn into a core that cannot start. Each removed
+	// back-edge is noted in the report.
+	breakGroupCycles(imp, rep)
 
 	// Policy resolution set: only what the imported config itself
 	// defines (nodes + groups) plus DIRECT. SakuNet adds no groups
