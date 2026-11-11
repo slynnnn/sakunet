@@ -26,6 +26,13 @@ import (
 //	pattern header-add Name Value  -> add a request header
 //	pattern header-del Name        -> delete a request header
 //	pattern response-header-set Name Value   (also -add / -del)
+//	pattern request-body SearchRegex Replacement
+//	pattern response-body SearchRegex Replacement
+//	                               -> regex-replace the request /
+//	                                  response body (QX-style native
+//	                                  body rewrite; Replacement is
+//	                                  the rest of the line, $1 refs
+//	                                  allowed, may contain spaces)
 //
 // Header values may contain spaces (everything after the header
 // name belongs to the value). Anything else is reported unsupported.
@@ -34,22 +41,30 @@ const (
 	OpRedirect = "redirect"
 	OpReject   = "reject"
 	OpHeader   = "header"
+	OpBody     = "body"
 )
 
 // CompiledRule is one executable rewrite rule.
 type CompiledRule struct {
 	Raw       string
 	Pattern   string
-	Op        string // OpRedirect | OpReject | OpHeader
+	Op        string // OpRedirect | OpReject | OpHeader | OpBody
 	Status    int    // redirect: 302/307; reject: HTTP status to answer
 	Target    string // redirect: replacement template
 	RejectTpl string // reject: "", "empty", "img", "dict", "array"
-	Direction string // header: "request" | "response"
+	Direction string // header/body: "request" | "response"
 	HeaderOp  string // header: "set" | "add" | "del"
 	Name      string // header name
 	Value     string // header value (set/add)
+	Replace   string // body: replacement template
 
-	re *regexp.Regexp
+	re     *regexp.Regexp // URL pattern
+	bodyRe *regexp.Regexp // body: search pattern
+}
+
+// ApplyBody runs a body rule's search/replace over a payload.
+func (r *CompiledRule) ApplyBody(b []byte) []byte {
+	return r.bodyRe.ReplaceAll(b, []byte(r.Replace))
 }
 
 // Match reports whether the rule's pattern matches the full URL.
@@ -99,6 +114,24 @@ func compileRule(raw string) (*CompiledRule, string) {
 		return nil, "正则无法编译：" + err.Error()
 	}
 	cr := &CompiledRule{Raw: raw, Pattern: pattern, re: re}
+
+	// Body form: pattern request-body|response-body Search [Replacement...]
+	if isBodyOp(toks[1]) {
+		cr.Op = OpBody
+		cr.Direction = strings.TrimSuffix(strings.ToLower(toks[1]), "-body")
+		if len(toks) < 3 {
+			return nil, "body 规则缺少搜索正则"
+		}
+		bodyRe, err := regexp.Compile(toks[2])
+		if err != nil {
+			return nil, "body 搜索正则无法编译：" + err.Error()
+		}
+		cr.bodyRe = bodyRe
+		// Replacement = everything after "pattern op search" in
+		// the raw line (may be empty = delete matches).
+		cr.Replace = rawAfterFields(raw, 3)
+		return cr, ""
+	}
 
 	// Header form: pattern <op> Name [Value...]
 	if isHeaderOp(toks[1]) {
@@ -169,6 +202,11 @@ func compileRule(raw string) (*CompiledRule, string) {
 		return cr, ""
 	}
 	return nil, "重写类型 " + kind + " 暂不支持（支持 302/307、reject 类与 header 类）"
+}
+
+func isBodyOp(tok string) bool {
+	t := strings.ToLower(tok)
+	return t == "request-body" || t == "response-body"
 }
 
 func isHeaderOp(tok string) bool {

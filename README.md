@@ -37,6 +37,7 @@
 | USER-AGENT、URL-REGEX、逻辑复合规则 | ❌ 不支持 | sing-box 路由层无对应物，逐条列入「未迁移清单」，不静默丢弃 |
 | MITM 引擎 | ✅ 已实现 | 仅 [MITM] hostname 命中才解密；CA 用导入配置里已有的 p12（本机内存解码）；面板可下载 CA 证书并给出 Windows 安装指引 |
 | URL Rewrite 引擎 | ✅ 已实现 | 302/307 重定向、reject 类（reject/reject-200/-img/-dict/-array）、header 类（请求头/响应头的 set/add/del，语法见引擎说明）；其余类型逐条标「不支持」并在设置页列出 |
+| 正文重写（QX 式） | ✅ 已实现（v1.2） | `pattern request-body 搜索正则 替换` / `response-body` 同理，原生正则替换（$1 引用、替换可为空即删除）；与脚本引擎分工：简单替换走重写、复杂逻辑走脚本。边界：正文上限 4MiB（超出透传）、非 identity 编码（如 gzip）的正文不走原生重写（脚本引擎会解码处理） |
 | 模块 .sgmodule | ✅ 已实现（部分） | 内嵌 MITM hostname、重写规则与脚本定义并入引擎生效（脚本见下行）；[Rule]/[Proxy] 段不并入，逐项标注 |
 | Surge/QX 的 JS 脚本引擎 | ✅ 已实现（子集） | goja 运行时；`http-request` / `http-response` 脚本在 MITM 解密流量上执行（去广告主力场景）；API 子集见下文「脚本引擎子集边界」；cron/event 等其他类型保留并标注「暂不支持」 |
 | 分享链接导入 | ✅ 已实现 | snell://、anytls://、hysteria2://（hy2://）、ss://（含 SIP002/老式）、trojan://、vmess://、vless:// 单链接与订阅 URL（整包 base64 自动识别） |

@@ -355,6 +355,10 @@ func (s *Server) serveIntercepted(client net.Conn, req *http.Request, host strin
 		}
 	}
 
+	// Native request-body rewrites (v1.2): after the other request
+	// rules, before scripts (scripts see the rewritten body).
+	s.applyRequestBody(req, fullURL)
+
 	// Request scripts (v1.1): after rewrite header ops, before
 	// forwarding. A script may rewrite URL/headers/body or answer
 	// the request itself (reject/mock short-circuit).
@@ -404,6 +408,8 @@ func (s *Server) serveIntercepted(client net.Conn, req *http.Request, host strin
 			applyHeaderOp(resp.Header, rule)
 		}
 	}
+	// Native response-body rewrites (v1.2), before scripts.
+	s.rewriteResponseBody(resp, respURL)
 	// Response scripts (v1.1) run last, over the final headers.
 	s.scriptResponse(resp, respURL, req)
 	// Response.Write would strip/keep framing itself; keep the
@@ -457,6 +463,8 @@ func (s *Server) handlePlainHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Native request-body rewrites (v1.2).
+	s.applyRequestBody(r, fullURL)
 	// Forward via the upstream proxy (or directly in tests).
 	var proxyFn func(*http.Request) (*url.URL, error)
 	if s.cfg.UpstreamProxy != "" {
@@ -497,6 +505,8 @@ func (s *Server) handlePlainHTTP(w http.ResponseWriter, r *http.Request) {
 			applyHeaderOp(resp.Header, rule)
 		}
 	}
+	// Native response-body rewrites (v1.2), before scripts.
+	s.rewriteResponseBody(resp, fullURL)
 	// Response scripts (v1.1) run last, over the final headers.
 	s.scriptResponse(resp, fullURL, outReq)
 	for k, vs := range resp.Header {
@@ -512,6 +522,94 @@ func (s *Server) handlePlainHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// --- Native body rewrites (v1.2) ----------------------------------
+
+// bodyRulesFor returns the compiled body rules of one direction
+// matching url, in configuration order.
+func (s *Server) bodyRulesFor(direction, fullURL string) []*surge.CompiledRule {
+	if s.cfg.Engine == nil {
+		return nil
+	}
+	var out []*surge.CompiledRule
+	for _, rule := range s.cfg.Engine.Rules {
+		if rule.Op == surge.OpBody && rule.Direction == direction && rule.Match(fullURL) {
+			out = append(out, rule)
+		}
+	}
+	return out
+}
+
+// identityEncoded reports whether a payload is carried without a
+// content encoding the body layer cannot safely rewrite (anything
+// but absent/identity is left untouched — encoded payloads are
+// the script engine's job, which decodes gzip itself).
+func identityEncoded(h http.Header) bool {
+	ce := strings.TrimSpace(strings.ToLower(h.Get("Content-Encoding")))
+	return ce == "" || ce == "identity"
+}
+
+func applyBodyRules(body []byte, rules []*surge.CompiledRule) []byte {
+	for _, r := range rules {
+		body = r.ApplyBody(body)
+	}
+	return body
+}
+
+// applyRequestBody buffers the request body (up to the shared
+// cap) and applies matching native request-body rules in place.
+func (s *Server) applyRequestBody(req *http.Request, fullURL string) {
+	rules := s.bodyRulesFor("request", fullURL)
+	if len(rules) == 0 || req.Body == nil || req.ContentLength == 0 {
+		return
+	}
+	if !identityEncoded(req.Header) {
+		s.cfg.logf("body-rewrite: request %s skipped (Content-Encoding %q)", fullURL, req.Header.Get("Content-Encoding"))
+		return
+	}
+	buf, err := io.ReadAll(io.LimitReader(req.Body, maxScriptBody+1))
+	if err != nil {
+		return
+	}
+	if len(buf) > maxScriptBody {
+		req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(buf), req.Body))
+		s.cfg.logf("body-rewrite: request %s exceeds %d bytes, passed through unmodified", fullURL, maxScriptBody)
+		return
+	}
+	_ = req.Body.Close()
+	out := applyBodyRules(buf, rules)
+	req.Body = io.NopCloser(bytes.NewReader(out))
+	req.ContentLength = int64(len(out))
+	req.Header.Set("Content-Length", fmt.Sprint(len(out)))
+}
+
+// rewriteResponseBody buffers the response body (up to the shared
+// cap) and applies matching native response-body rules in place,
+// fixing the framing headers afterwards.
+func (s *Server) rewriteResponseBody(resp *http.Response, fullURL string) {
+	rules := s.bodyRulesFor("response", fullURL)
+	if len(rules) == 0 || resp.Body == nil {
+		return
+	}
+	if !identityEncoded(resp.Header) {
+		s.cfg.logf("body-rewrite: response %s skipped (Content-Encoding %q)", fullURL, resp.Header.Get("Content-Encoding"))
+		return
+	}
+	buf, err := io.ReadAll(io.LimitReader(resp.Body, maxScriptBody+1))
+	if err != nil {
+		return
+	}
+	if len(buf) > maxScriptBody {
+		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(buf), resp.Body))
+		s.cfg.logf("body-rewrite: response %s exceeds %d bytes, passed through unmodified", fullURL, maxScriptBody)
+		return
+	}
+	_ = resp.Body.Close()
+	out := applyBodyRules(buf, rules)
+	resp.Body = io.NopCloser(bytes.NewReader(out))
+	resp.ContentLength = int64(len(out))
+	resp.Header.Set("Content-Length", fmt.Sprint(len(out)))
 }
 
 // --- JS script pipeline (v1.1) -------------------------------------
