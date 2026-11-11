@@ -46,6 +46,8 @@ type Manager struct {
 	sourceName   string
 	sourceAt     time.Time
 	tun          bool
+	prefs        prefs
+	bgOnce       sync.Once
 	mitmSrv      *mitm.Server
 	mitmInfo     *MITMInfo
 	scriptRunner *script.Runner

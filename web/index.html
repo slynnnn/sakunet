@@ -189,6 +189,17 @@
     <div class="card" style="padding:6px 0">
       <div class="row"><span>系统代理（MITM 引擎运行时自动经引擎）</span><span><button class="btn gray" id="btn-proxy-on">开启</button> <button class="btn gray" id="btn-proxy-off">关闭</button></span></div>
     </div>
+    <div class="sec-title">自动化</div>
+    <div class="card" style="padding:6px 0">
+      <div class="row"><span>开机自启（登录时启动 SakuNet）</span><span><button class="btn gray" id="btn-autostart-on">开启</button> <button class="btn gray" id="btn-autostart-off">关闭</button></span></div>
+      <div class="row"><span>自启状态</span><span class="val" id="autostart-state">—</span></div>
+      <div class="row"><span>订阅自动更新</span><span><input type="text" id="sub-url" placeholder="订阅 URL https://…" style="width:190px;font-size:12.5px"></span></div>
+      <div class="row"><span>每隔（小时）拉取并入节点集</span><span><input type="number" id="sub-hours" min="1" max="168" value="24" style="width:64px;font-size:12.5px"> <button class="btn gray" id="btn-sub-on">开启</button> <button class="btn gray" id="btn-sub-off">关闭</button></span></div>
+      <div class="row"><span>上次自动更新</span><span class="val" id="sub-last">—</span></div>
+      <div class="row"><span>软件版本</span><span class="val" id="app-version">—</span></div>
+      <div class="row"><span>检查软件更新（只提示，不自动替换）</span><button class="btn gray" id="btn-update-check">检查更新</button></div>
+      <div id="update-result" style="padding:2px 16px 10px;font-size:12.5px;line-height:1.7"></div>
+    </div>
     <div class="hint">SakuNet v1.0 · QX 的操作与设计语言 + Surge 配置全兼容 · 内核为 sing-box 侧车进程。</div>
     <div class="err" id="err2"></div>
   </div>
@@ -479,6 +490,34 @@ $("btn-reload").onclick = async () => { try{ await j("/api/restart", {method:"PO
 $("btn-restart").onclick = async () => { try{ await j("/api/restart", {method:"POST"}); }catch(e){ showErr(e); } refreshStatus(); };
 $("btn-proxy-on").onclick = async () => { try{ await j("/api/sysproxy", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({on:true})}); }catch(e){ showErr(e); } };
 $("btn-proxy-off").onclick = async () => { try{ await j("/api/sysproxy", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({on:false})}); }catch(e){ showErr(e); } };
+function renderAutomation(v){
+  $("autostart-state").textContent = !v.autostart_supported ? "当前平台不支持" : (v.autostart ? "已开启" : "已关闭");
+  if(document.activeElement !== $("sub-url")) $("sub-url").value = v.sub_url || "";
+  if(document.activeElement !== $("sub-hours")) $("sub-hours").value = v.sub_every_h || 24;
+  $("sub-last").textContent = v.sub_last_at ? (v.sub_last_at + " · " + (v.sub_last_msg || "")) : (v.sub_auto ? "等待首次更新" : "未开启");
+}
+async function loadAutomation(){ try{ renderAutomation(await j("/api/automation")); }catch(e){} }
+async function setAutostart(on){ try{ renderAutomation(await j("/api/autostart", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({on: on})})); }catch(e){ showErr(e); } }
+$("btn-autostart-on").onclick = () => setAutostart(true);
+$("btn-autostart-off").onclick = () => setAutostart(false);
+async function setSub(auto){
+  try{
+    renderAutomation(await j("/api/subscription", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({url: $("sub-url").value, every_hours: parseInt($("sub-hours").value || "24", 10), auto: auto})}));
+  }catch(e){ showErr(e); }
+}
+$("btn-sub-on").onclick = () => setSub(true);
+$("btn-sub-off").onclick = () => setSub(false);
+$("btn-update-check").onclick = async () => {
+  $("update-result").textContent = "检查中…";
+  try{
+    const r = await j("/api/update-check");
+    $("app-version").textContent = r.current;
+    if(r.error){ $("update-result").textContent = r.error; }
+    else if(r.update){ $("update-result").innerHTML = "有新版 <b>" + esc(r.latest) + "</b>：请到 <a href=\"" + esc(r.url) + "\" target=\"_blank\">Releases</a> 下载新版压缩包，解压覆盖即可（配置与数据在同目录、不会丢）。"; }
+    else { $("update-result").textContent = "已是最新版（" + r.current + "）。"; }
+  }catch(e){ $("update-result").textContent = String(e.message || e); }
+};
+loadAutomation();
 refreshStatus(); loadSource(); setInterval(refreshStatus, 8000); setInterval(pollTraffic, 2000);
 </script>
 </body>

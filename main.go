@@ -28,6 +28,7 @@ import (
 	"sakunet/internal/surge"
 	"sakunet/internal/sysproxy"
 	"sakunet/internal/tray"
+	"sakunet/internal/updchk"
 	"sakunet/web"
 )
 
@@ -421,6 +422,50 @@ func main() {
 			"report": mgr.ImportReport(),
 		})
 	})
+	mux.HandleFunc("/api/automation", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, mgr.Automation())
+	})
+	mux.HandleFunc("/api/autostart", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			errJSON(w, fmt.Errorf("POST required"))
+			return
+		}
+		var body struct {
+			On bool `json:"on"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+			errJSON(w, err)
+			return
+		}
+		if err := mgr.SetAutostart(body.On); err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, mgr.Automation())
+	})
+	mux.HandleFunc("/api/subscription", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			errJSON(w, fmt.Errorf("POST required"))
+			return
+		}
+		var body struct {
+			URL      string `json:"url"`
+			EveryH   int    `json:"every_hours"`
+			Auto     bool   `json:"auto"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+			errJSON(w, err)
+			return
+		}
+		if err := mgr.SetSubscription(body.URL, body.EveryH, body.Auto); err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, mgr.Automation())
+	})
+	mux.HandleFunc("/api/update-check", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, updchk.Latest(Version, nil))
+	})
 	mux.HandleFunc("/api/sysproxy", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			On bool `json:"on"`
@@ -441,6 +486,8 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]string{"ok": "1"})
 	})
+
+	mgr.StartBackground()
 
 	dashURL := "http://" + *addr
 	log.Printf("SakuNet %s dashboard: %s", Version, dashURL)

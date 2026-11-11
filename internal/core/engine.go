@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"sakunet/internal/config"
 	"sakunet/internal/mitm"
@@ -31,6 +32,15 @@ type MITMInfo struct {
 
 type prefs struct {
 	Tun bool `json:"tun"`
+	// Automation (v1.2): autostart intent (the registry entry is
+	// the live truth on Windows; this mirrors the last set value),
+	// and the subscription auto-update schedule + last outcome.
+	Autostart  bool      `json:"autostart,omitempty"`
+	SubURL     string    `json:"sub_url,omitempty"`
+	SubEveryH  int       `json:"sub_every_h,omitempty"`
+	SubAuto    bool      `json:"sub_auto,omitempty"`
+	SubLastAt  time.Time `json:"sub_last_at,omitempty"`
+	SubLastMsg string    `json:"sub_last_msg,omitempty"`
 }
 
 func (m *Manager) prefsPath() string { return filepath.Join(m.appDir, "sakunet-prefs.json") }
@@ -40,12 +50,14 @@ func (m *Manager) loadPrefs() {
 		var p prefs
 		if json.Unmarshal(raw, &p) == nil {
 			m.tun = p.Tun
+			m.prefs = p
 		}
 	}
 }
 
 func (m *Manager) savePrefs() error {
-	raw, _ := json.Marshal(prefs{Tun: m.tun})
+	m.prefs.Tun = m.tun
+	raw, _ := json.Marshal(m.prefs)
 	return os.WriteFile(m.prefsPath(), raw, 0o600)
 }
 
