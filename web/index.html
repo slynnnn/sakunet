@@ -145,7 +145,7 @@
     <div class="sec-title">导入模块（.sgmodule）</div>
     <div class="card" style="padding:6px 0">
       <div class="row"><span>选择 .sgmodule 文件</span><span><input type="file" id="mod-file" accept=".sgmodule,.txt" style="max-width:190px;font-size:12.5px"></span></div>
-      <div class="row"><span>其 MITM 主机名与重写规则并入引擎生效；脚本部分不执行</span><button class="btn" id="btn-module">导入</button></div>
+      <div class="row"><span>其 MITM 主机名、重写规则与脚本定义并入引擎生效</span><button class="btn" id="btn-module">导入</button></div>
       <div id="mod-result" style="padding:2px 16px 10px;font-size:12.5px;line-height:1.7"></div>
     </div>
     <div class="sec-title">MITM / 重写引擎</div>
@@ -156,6 +156,12 @@
       <div class="row"><span>下载 CA 证书并安装到 Windows 信任库</span><span><a class="btn gray" style="text-decoration:none;display:inline-block;line-height:30px" href="/api/mitm/ca.cer">下载 .cer</a></span></div>
       <div class="hint" style="padding:6px 16px">安装方法：下载后双击 → 安装证书 → 本地计算机 → 放入「受信任的根证书颁发机构」；或管理员命令行运行 <span style="font-family:monospace">certutil -addstore -f Root sakunet-ca.cer</span>。只有导入配置 [MITM] 名单内的主机才会被解密重写，其余 HTTPS 原样透传。</div>
       <div id="mitm-unsupported" style="padding:2px 16px 10px;font-size:12.5px;line-height:1.7"></div>
+    </div>
+    <div class="sec-title">脚本引擎（JS）</div>
+    <div class="card" style="padding:6px 0">
+      <div id="script-list" style="padding:2px 0"><div class="hint" style="padding:8px 16px">暂无脚本。脚本来自 Surge 配置 [Script] 段与模块 .sgmodule，随配置/模块导入；http-request / http-response 类型会在 MITM 解密流量上执行（去广告主力），其余类型暂不支持。</div></div>
+      <div class="row"><span>最近执行日志与通知</span><button class="btn gray" id="btn-script-log">查看脚本日志</button></div>
+      <div id="script-log" style="padding:2px 16px 10px;font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-all"></div>
     </div>
     <div class="sec-title">自检与诊断</div>
     <div class="card" style="padding:6px 0">
@@ -301,6 +307,7 @@ async function refreshStatus(){
     $("mitm-fp").textContent = mi.ca_fingerprint || "—";
     $("mitm-unsupported").innerHTML = (mi.unsupported && mi.unsupported.length)
       ? "不支持的重写规则 " + mi.unsupported.length + " 条：<br>" + mi.unsupported.map(u => "· " + u.raw + " — " + u.reason).join("<br>") : "";
+    renderScripts(mi.scripts || []);
     try{
       const t = await j("/api/tun");
       $("tun-state").textContent = (t.tun ? "已开启" : "已关闭") + (t.admin ? " · 管理员" : " · 非管理员");
@@ -339,6 +346,34 @@ document.querySelectorAll(".tabbar button").forEach(b => {
     document.querySelectorAll(".page").forEach(p => p.classList.toggle("sel", p.id === "page-" + b.dataset.page));
   };
 });
+function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+function renderScripts(list){
+  const box = $("script-list");
+  if(!list.length){
+    box.innerHTML = '<div class="hint" style="padding:8px 16px">暂无脚本。脚本来自 Surge 配置 [Script] 段与模块 .sgmodule，随配置/模块导入；http-request / http-response 类型会在 MITM 解密流量上执行（去广告主力），其余类型暂不支持。</div>';
+    return;
+  }
+  box.innerHTML = list.map(s => {
+    let st, color = "#8e8e93";
+    if(!s.supported){ st = "类型暂不支持"; }
+    else if(s.load_error){ st = "加载失败：" + s.load_error; color = "#d70015"; }
+    else if(!s.enabled){ st = "已禁用"; }
+    else if(s.last_run){ st = s.last_ok ? ("已启用 · 最近执行 ✓ " + (s.last_ms || 0) + " ms") : ("已启用 · 最近执行 ✗ " + (s.last_error || "")); color = s.last_ok ? "#34c759" : "#d70015"; }
+    else { st = "已启用 · 尚未执行"; color = "#34c759"; }
+    return '<div class="row" style="align-items:flex-start"><span style="min-width:0"><span style="font-size:14px">' + esc(s.name) + '</span>'
+      + ' <span class="ptag">' + esc(s.type) + '</span>'
+      + '<br><span style="font-size:11.5px;color:#8e8e93">' + esc(s.source || "") + '</span></span>'
+      + '<span class="val" style="color:' + color + '">' + esc(st) + '</span></div>';
+  }).join("");
+}
+$("btn-script-log").onclick = async () => {
+  try{
+    const r = await j("/api/scripts/logs");
+    const lines = (r.logs || []).slice(-60).map(l => (l.at || "") + " [" + (l.script || "引擎") + "] " + l.text);
+    const notes = (r.notifications || []).map(n => "🔔 " + (n.at || "") + " " + n.title + " " + (n.body || ""));
+    $("script-log").textContent = (lines.concat(notes).join("\n") || "（暂无日志：内核未启动或脚本尚未执行）");
+  }catch(e){ showErr(e); }
+};
 function renderReport(rep){
   if(!rep){ $("imp-result").innerHTML = ""; return; }
   let h = '<div style="font-size:13.5px;line-height:1.75">'
@@ -348,7 +383,7 @@ function renderReport(rep){
     + (rep.final_policy ? '<br>FINAL 指向：' + rep.final_policy : '')
     + '</div>';
   if((rep.engine_pending || []).length){
-    h += '<div style="font-size:13.5px;margin-top:6px">📦 引擎数据（MITM/重写引擎运行时生效，脚本仅保存不执行）：</div>'
+    h += '<div style="font-size:13.5px;margin-top:6px">📦 引擎数据（已导入 · 引擎上线：MITM / URL 重写 / JS 脚本运行时生效）：</div>'
       + '<div style="font-size:12.5px;color:#3a3a3c;line-height:1.7">'
       + rep.engine_pending.map(p => '· [' + p.section + '] ' + p.summary + '（已并入引擎数据，内核运行时生效）').join('<br>')
       + '</div>';
@@ -423,7 +458,7 @@ $("btn-module").onclick = async () => {
     const r = await fetch("/api/import-module", { method:"POST", body: fd });
     const t = await r.json();
     if(!r.ok) throw new Error(t.error || ("HTTP " + r.status));
-    $("mod-result").innerHTML = "模块「" + t.name + "」：MITM 主机名 " + t.hostnames + " · 重写规则 " + t.rewrites + "（已生效）"
+    $("mod-result").innerHTML = "模块「" + t.name + "」：MITM 主机名 " + t.hostnames + " · 重写规则 " + t.rewrites + " · 脚本 " + (t.scripts || 0) + "（已并入引擎）"
       + ((t.notes || []).length ? "<br>" + t.notes.map(n => "· " + n).join("<br>") : "");
     showErr(""); refreshStatus();
   }catch(e){ showErr(e); }

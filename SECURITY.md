@@ -34,5 +34,5 @@ SakuNet 是一个在本机运行的个人代理客户端：它持有用户的节
 ## 已知边界（如实列出）
 - 本地端口无鉴权：同机恶意进程可调用面板 API（含切换节点、导入配置）。这是与 Surge/QX 本机面板相同的模型；在多用户机器上请勿运行。
 - TUN 模式需要管理员权限，提权走 Windows UAC（ShellExecute runas），无静默提权。
-- JS 脚本不执行：含脚本的模块/配置，其脚本部分不生效（导入时标注），不存在脚本沙箱逃逸面。
-- govulncheck 与依赖清单随版本回执公布；依赖仅限：fyne.io/systray（托盘）、software.sslmate.com/src/go-pkcs12（CA 解码）及其传递依赖。
+- JS 脚本引擎（v1.1 起）：脚本在 goja（纯 Go 运行时，无文件/进程/网络系统调用面）内执行，每次运行有硬超时强制中断；脚本只能经受控 API 影响流量（$request/$response 改写）、写本机键值存储（script-store.json，0600）与发脚本自有 HTTP 请求（$httpClient/$task.fetch，仅 http/https、超时受脚本预算约束）。脚本源码在导入时抓取并缓存（附 SHA-256 指纹），不在运行时联网拉取。**请只导入你信任来源的脚本**：脚本能看到并改写经过 MITM 解密的流量内容，这是该功能本身的前提（与 Surge/QX 相同）。
+- govulncheck 与依赖清单随版本回执公布；依赖仅限：fyne.io/systray（托盘）、software.sslmate.com/src/go-pkcs12（CA 解码）、github.com/dop251/goja（JS 运行时）及其传递依赖。

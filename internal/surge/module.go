@@ -7,11 +7,12 @@ import (
 )
 
 // .sgmodule support. A Surge module can carry many section kinds;
-// SakuNet merges the two the MITM/rewrite engine executes —
-// [MITM] hostnames and [URL Rewrite] rules — into the active
-// import's engine data. Script parts are counted and reported but
-// NEVER executed (SakuNet has no JS script engine); [Rule] /
-// [Proxy] sections of a module are reported as not merged.
+// SakuNet merges what its engines execute — [MITM] hostnames and
+// [URL Rewrite] rules into the MITM/rewrite engine, and [Script]
+// definitions into the JS engine (since v1.1: http-request /
+// http-response scripts run; other types are preserved and
+// reported as unsupported). [Rule] / [Proxy] sections of a module
+// are reported as not merged.
 
 type ModuleRecord struct {
 	Name      string    `json:"name"`
@@ -27,6 +28,7 @@ type ModuleResult struct {
 	Hostnames    []string
 	Rewrites     []RewriteRule
 	ScriptNames  []string
+	Scripts      []ScriptDef
 	OtherSection map[string]int // sections present but not merged
 	Notes        []string
 }
@@ -81,9 +83,12 @@ func ParseModule(name string, data []byte) *ModuleResult {
 			}
 			mr.Rewrites = append(mr.Rewrites, r)
 		case "Script":
-			n, _, ok := strings.Cut(line, "=")
+			n, rest, ok := strings.Cut(line, "=")
 			if ok {
-				mr.ScriptNames = append(mr.ScriptNames, strings.TrimSpace(n))
+				name := strings.TrimSpace(n)
+				mr.ScriptNames = append(mr.ScriptNames, name)
+				_, kv := params(splitFields(rest))
+				mr.Scripts = append(mr.Scripts, ScriptDef{Name: name, Params: kv})
 			}
 		default:
 			if section != "" {
@@ -92,16 +97,18 @@ func ParseModule(name string, data []byte) *ModuleResult {
 		}
 	}
 	if len(mr.ScriptNames) > 0 {
-		mr.Notes = append(mr.Notes, fmt.Sprintf("模块含 %d 个脚本：脚本部分不执行（SakuNet 无 JS 脚本引擎），重写部分已生效", len(mr.ScriptNames)))
+		mr.Notes = append(mr.Notes, fmt.Sprintf("模块含 %d 个脚本：定义已并入 JS 脚本引擎（http-request/http-response 执行，其余类型暂不支持），源码在导入时解析", len(mr.ScriptNames)))
 	}
 	for sec, n := range mr.OtherSection {
-		mr.Notes = append(mr.Notes, fmt.Sprintf("模块 [%s] 段共 %d 行未并入（v1.0 仅并入 MITM 主机名与 URL Rewrite）", sec, n))
+		mr.Notes = append(mr.Notes, fmt.Sprintf("模块 [%s] 段共 %d 行未并入（仅并入 MITM 主机名、URL Rewrite 与 Script 定义）", sec, n))
 	}
 	return mr
 }
 
 // MergeModule folds a parsed module into the import's engine data
-// (deduplicated) and records the merge in the report.
+// (deduplicated) and records the merge in the report. Script
+// definitions are merged too (tagged with the module as their
+// source); their bodies are resolved by ResolveScripts afterwards.
 func (imp *Imported) MergeModule(mr *ModuleResult) ModuleRecord {
 	have := map[string]bool{}
 	for _, h := range imp.Engine.MITMHostnames {
@@ -127,13 +134,32 @@ func (imp *Imported) MergeModule(mr *ModuleResult) ModuleRecord {
 			addedR++
 		}
 	}
+	haveS := map[string]bool{}
+	scriptKey := func(sd ScriptDef) string {
+		return sd.Name + "|" + sd.Params["type"] + "|" + sd.Params["pattern"] + "|" + sd.Params["script-path"]
+	}
+	for _, sd := range imp.Engine.Scripts {
+		haveS[scriptKey(sd)] = true
+	}
+	addedS := 0
+	for _, sd := range mr.Scripts {
+		if haveS[scriptKey(sd)] {
+			continue
+		}
+		haveS[scriptKey(sd)] = true
+		// Pre-tag the display source so resolution (resolve.go)
+		// keeps the module attribution instead of the bare path.
+		sd.Resolved = &ResolvedScript{Source: "模块「" + mr.Name + "」", Enabled: true}
+		imp.Engine.Scripts = append(imp.Engine.Scripts, sd)
+		addedS++
+	}
 	rec := ModuleRecord{
 		Name: mr.Name, At: time.Now(),
 		Hostnames: addedH, Rewrites: addedR, Scripts: len(mr.ScriptNames),
 	}
 	imp.Modules = append(imp.Modules, rec)
 	imp.Report.Notes = append(imp.Report.Notes,
-		fmt.Sprintf("模块「%s」已并入：MITM 主机名 +%d、重写规则 +%d（已生效）", mr.Name, addedH, addedR))
+		fmt.Sprintf("模块「%s」已并入：MITM 主机名 +%d、重写规则 +%d、脚本定义 +%d（已生效）", mr.Name, addedH, addedR, addedS))
 	imp.Report.Notes = append(imp.Report.Notes, mr.Notes...)
 	return rec
 }

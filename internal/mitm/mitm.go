@@ -2,6 +2,9 @@ package mitm
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
+	"compress/zlib"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -19,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"sakunet/internal/script"
 	"sakunet/internal/surge"
 )
 
@@ -26,7 +30,10 @@ import (
 type Config struct {
 	Hostnames []string // imported [MITM] hostname list (supports *.suffix and -exclusions)
 	Engine    *surge.CompiledEngine
-	CA        tls.Certificate
+	// Scripts, when non-nil, runs http-request / http-response JS
+	// scripts (v1.1) inside the intercepted/plain pipelines.
+	Scripts *script.Runner
+	CA      tls.Certificate
 	// UpstreamProxy is the sing-box mixed inbound ("127.0.0.1:2080").
 	// Empty means dial origins directly (used by tests).
 	UpstreamProxy string
@@ -348,6 +355,22 @@ func (s *Server) serveIntercepted(client net.Conn, req *http.Request, host strin
 		}
 	}
 
+	// Request scripts (v1.1): after rewrite header ops, before
+	// forwarding. A script may rewrite URL/headers/body or answer
+	// the request itself (reject/mock short-circuit).
+	if respond, newURL := s.scriptRequest(req, fullURL); respond != nil {
+		_ = writeScriptResponse(client, respond)
+		return false
+	} else if newURL != "" && newURL != fullURL {
+		if u, err := url.Parse(newURL); err == nil && u.Host != "" {
+			req.Host = u.Host
+			req.URL.Path = u.Path
+			req.URL.RawQuery = u.RawQuery
+			fullURL = newURL
+			host = u.Hostname()
+		}
+	}
+
 	// Forward to the origin through the upstream.
 	target := req.Host
 	if _, _, err := net.SplitHostPort(target); err != nil {
@@ -381,6 +404,8 @@ func (s *Server) serveIntercepted(client net.Conn, req *http.Request, host strin
 			applyHeaderOp(resp.Header, rule)
 		}
 	}
+	// Response scripts (v1.1) run last, over the final headers.
+	s.scriptResponse(resp, respURL, req)
 	// Response.Write would strip/keep framing itself; keep the
 	// connection usable for the next request when possible.
 	keepAlive := !resp.Close
@@ -444,6 +469,23 @@ func (s *Server) handlePlainHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	outReq := r.Clone(r.Context())
 	outReq.RequestURI = ""
+	// Request scripts (v1.1).
+	if respond, newURL := s.scriptRequest(outReq, fullURL); respond != nil {
+		for k, vs := range respond.Headers {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(respond.Status)
+		_, _ = w.Write(respond.Body)
+		return
+	} else if newURL != "" && newURL != fullURL {
+		if u, err := url.Parse(newURL); err == nil {
+			outReq.URL = u
+			outReq.Host = u.Host
+			fullURL = newURL
+		}
+	}
 	resp, err := tr.RoundTrip(outReq)
 	if err != nil {
 		http.Error(w, "upstream error", http.StatusBadGateway)
@@ -455,13 +497,167 @@ func (s *Server) handlePlainHTTP(w http.ResponseWriter, r *http.Request) {
 			applyHeaderOp(resp.Header, rule)
 		}
 	}
+	// Response scripts (v1.1) run last, over the final headers.
+	s.scriptResponse(resp, fullURL, outReq)
 	for k, vs := range resp.Header {
+		if strings.EqualFold(k, "Content-Length") {
+			continue // re-emitted below from the (possibly scripted) body
+		}
 		for _, v := range vs {
 			w.Header().Add(k, v)
 		}
 	}
+	if resp.ContentLength >= 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(resp.ContentLength))
+	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// --- JS script pipeline (v1.1) -------------------------------------
+
+// maxScriptBody caps how much request/response body the script
+// layer buffers. Larger payloads stream through unscripted.
+const maxScriptBody = 4 << 20
+
+// scriptRequest runs matching http-request scripts against req,
+// mutating it in place (headers, body). It returns a non-nil
+// *script.Response when a script short-circuits the request
+// (reject/mock), plus the possibly rewritten full URL.
+func (s *Server) scriptRequest(req *http.Request, fullURL string) (*script.Response, string) {
+	sr := s.cfg.Scripts
+	if sr == nil || !sr.Runnable(script.TypeRequest, fullURL) {
+		return nil, fullURL
+	}
+	sreq := &script.Request{Method: req.Method, URL: fullURL, Headers: req.Header}
+	bodyBuffered := false
+	if sr.NeedsBody(fullURL) && req.Body != nil {
+		prefix, err := io.ReadAll(io.LimitReader(req.Body, maxScriptBody+1))
+		if err == nil {
+			if len(prefix) > maxScriptBody {
+				// Too large to script: restore the stream untouched.
+				req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(prefix), req.Body))
+				s.cfg.logf("script: request body exceeds %d bytes, body not exposed for %s", maxScriptBody, fullURL)
+			} else {
+				sreq.Body = prefix
+				bodyBuffered = true
+			}
+		}
+	}
+	out := sr.RunRequest(sreq)
+	if out.Respond != nil {
+		return out.Respond, fullURL
+	}
+	if out.Headers != nil {
+		req.Header = out.Headers
+	}
+	if bodyBuffered {
+		body := sreq.Body
+		if out.BodySet {
+			body = out.Body
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		req.ContentLength = int64(len(body))
+		req.Header.Del("Content-Length") // framing derives from ContentLength on Write
+	}
+	return nil, out.URL
+}
+
+// scriptResponse runs matching http-response scripts over resp,
+// mutating status/headers/body in place. Bodies above the cap (or
+// with an undecodable Content-Encoding that a script changed) are
+// handled conservatively: unmodified traffic is restored
+// byte-for-byte.
+func (s *Server) scriptResponse(resp *http.Response, fullURL string, origReq *http.Request) {
+	sr := s.cfg.Scripts
+	if sr == nil || !sr.Runnable(script.TypeResponse, fullURL) {
+		return
+	}
+	if resp.Body == nil {
+		return
+	}
+	prefix, err := io.ReadAll(io.LimitReader(resp.Body, maxScriptBody+1))
+	if err != nil {
+		resp.Body = io.NopCloser(bytes.NewReader(prefix))
+		return
+	}
+	if len(prefix) > maxScriptBody {
+		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(prefix), resp.Body))
+		s.cfg.logf("script: response body exceeds %d bytes, scripts skipped for %s", maxScriptBody, fullURL)
+		return
+	}
+	_ = resp.Body.Close()
+	enc := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
+	scriptBody, decoded := decodeForScript(prefix, enc)
+	sreq := &script.Request{Method: origReq.Method, URL: fullURL, Headers: origReq.Header}
+	out := sr.RunResponse(fullURL, sreq, &script.Response{
+		Status: resp.StatusCode, Headers: resp.Header, Body: scriptBody,
+	})
+	resp.StatusCode = out.Status
+	resp.Status = fmt.Sprintf("%d %s", out.Status, http.StatusText(out.Status))
+	resp.Header = out.Headers
+	if bytes.Equal(out.Body, scriptBody) {
+		// Unmodified: restore the original wire bytes (still
+		// encoded if they arrived encoded).
+		resp.Body = io.NopCloser(bytes.NewReader(prefix))
+		return
+	}
+	// Modified: the script's body is authoritative and unencoded.
+	resp.Body = io.NopCloser(bytes.NewReader(out.Body))
+	resp.ContentLength = int64(len(out.Body))
+	resp.Header.Del("Content-Length")
+	if decoded {
+		resp.Header.Del("Content-Encoding")
+	}
+}
+
+// decodeForScript transparently decompresses gzip/deflate bodies
+// so scripts see the text they expect (Surge behaves the same).
+// Returns (bodyForScript, wasDecoded).
+func decodeForScript(body []byte, enc string) ([]byte, bool) {
+	switch enc {
+	case "gzip":
+		zr, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return body, false
+		}
+		defer zr.Close()
+		dec, err := io.ReadAll(io.LimitReader(zr, maxScriptBody+1))
+		if err != nil || len(dec) > maxScriptBody {
+			return body, false
+		}
+		return dec, true
+	case "deflate":
+		zr, err := zlib.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return body, false
+		}
+		defer zr.Close()
+		dec, err := io.ReadAll(io.LimitReader(zr, maxScriptBody+1))
+		if err != nil || len(dec) > maxScriptBody {
+			return body, false
+		}
+		return dec, true
+	}
+	return body, false
+}
+
+// writeScriptResponse answers an intercepted request directly
+// from a script's {response:{...}} $done (reject/mock).
+func writeScriptResponse(c net.Conn, rp *script.Response) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "HTTP/1.1 %d %s\r\n", rp.Status, http.StatusText(rp.Status))
+	for k, vs := range rp.Headers {
+		for _, v := range vs {
+			fmt.Fprintf(&b, "%s: %s\r\n", k, v)
+		}
+	}
+	fmt.Fprintf(&b, "Content-Length: %d\r\nConnection: close\r\n\r\n", len(rp.Body))
+	if _, err := io.WriteString(c, b.String()); err != nil {
+		return err
+	}
+	_, err := c.Write(rp.Body)
+	return err
 }
 
 // --- helpers --------------------------------------------------------

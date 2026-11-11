@@ -7,10 +7,12 @@ import (
 
 // convertEngineSections parses [MITM], [URL Rewrite] and [Script]
 // into imp.Engine and records them in the report as engine-backed
-// sections: preserved in full and (since v1.0) executed by the
-// MITM/rewrite engine — MITM and URL Rewrite live, Script stored
-// but never executed (no JS engine). They deliberately do not
-// appear in Report.Unmigrated: nothing about them is lost.
+// sections: preserved in full and executed by the engines — MITM
+// and URL Rewrite since v1.0, [Script] (http-request /
+// http-response) by the JS engine since v1.1. Script bodies are
+// resolved later, at panel import time (see resolve.go). They
+// deliberately do not appear in Report.Unmigrated: nothing about
+// them is lost.
 func convertEngineSections(rc *rawConfig, imp *Imported) {
 	rep := &imp.Report
 
@@ -73,7 +75,7 @@ func convertEngineSections(rc *rawConfig, imp *Imported) {
 		rep.EnginePending = append(rep.EnginePending, PendingSection{
 			Section: "Script",
 			Count:   len(imp.Engine.Scripts),
-			Summary: fmt.Sprintf("%d 个脚本定义已保存", len(imp.Engine.Scripts)),
+			Summary: fmt.Sprintf("%d 个脚本已导入（http-request/http-response 由 JS 脚本引擎执行，其余类型暂不支持）", len(imp.Engine.Scripts)),
 		})
 	}
 }

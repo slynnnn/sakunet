@@ -11,6 +11,7 @@ import (
 
 	"sakunet/internal/config"
 	"sakunet/internal/mitm"
+	"sakunet/internal/script"
 	"sakunet/internal/surge"
 )
 
@@ -22,6 +23,7 @@ type MITMInfo struct {
 	Hostnames     int                     `json:"hostnames"`
 	RulesOK       int                     `json:"rules_ok"`
 	Unsupported   []surge.UnsupportedRule `json:"unsupported,omitempty"`
+	Scripts       []script.Info           `json:"scripts,omitempty"`
 	CASubject     string                  `json:"ca_subject,omitempty"`
 	CAExpiry      string                  `json:"ca_expiry,omitempty"`
 	CAFingerprint string                  `json:"ca_fingerprint,omitempty"` // SHA-256, hex with colons
@@ -89,6 +91,22 @@ func (m *Manager) startEngineLocked() {
 	m.mitmInfo.Unsupported = ce.Unsupported
 	m.mitmInfo.Hostnames = len(imp.Engine.MITMHostnames)
 
+	// JS script engine (v1.1): definitions come from the imported
+	// config + merged modules, bodies already resolved at import.
+	scriptDefs := script.FromEngine(&imp.Engine)
+	runner := script.NewRunner(scriptDefs, script.Options{
+		StorePath: filepath.Join(m.appDir, "script-store.json"),
+		Log:       log.New(os.Stderr, "", log.LstdFlags),
+	})
+	m.scriptRunner = runner
+	m.mitmInfo.Scripts = runner.Infos()
+	hasScripts := false
+	for _, d := range scriptDefs {
+		if d.Enabled && d.Supported && d.LoadErr == "" {
+			hasScripts = true
+		}
+	}
+
 	caCert, caX509, caErr := mitm.LoadCA(imp.Engine.MITMParams)
 	hostnames := imp.Engine.MITMHostnames
 	if caErr != nil {
@@ -102,15 +120,16 @@ func (m *Manager) startEngineLocked() {
 		sum := sha256.Sum256(caX509.Raw)
 		m.mitmInfo.CAFingerprint = colonHex(sum[:])
 	}
-	if len(hostnames) == 0 && len(ce.Rules) == 0 {
+	if len(hostnames) == 0 && len(ce.Rules) == 0 && !hasScripts {
 		if m.mitmInfo.Reason == "" {
-			m.mitmInfo.Reason = "配置无 MITM 主机名与重写规则"
+			m.mitmInfo.Reason = "配置无 MITM 主机名、重写规则与脚本"
 		}
 		return
 	}
 	srv, err := mitm.Start(mitm.Config{
 		Hostnames:     hostnames,
 		Engine:        ce,
+		Scripts:       runner,
 		CA:            caCert,
 		UpstreamProxy: "127.0.0.1:2080",
 		Log:           log.New(os.Stderr, "", log.LstdFlags),
@@ -132,6 +151,7 @@ func (m *Manager) stopEngineLocked() {
 		m.mitmSrv.Close()
 		m.mitmSrv = nil
 	}
+	m.scriptRunner = nil
 	if m.mitmInfo != nil {
 		m.mitmInfo.State = "standby"
 		m.mitmInfo.Addr = ""
@@ -286,6 +306,7 @@ func (m *Manager) ImportModule(name string, data []byte) (*surge.ModuleResult, e
 	}
 	mr := surge.ParseModule(name, data)
 	imp.MergeModule(mr)
+	mr.Notes = append(mr.Notes, imp.ResolveScripts()...)
 	if err := surge.SaveImported(imp, m.importedPath()); err != nil {
 		return nil, err
 	}
